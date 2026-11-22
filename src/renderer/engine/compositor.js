@@ -1,7 +1,7 @@
 // Draws the program picture (what everyone sees) at a steady frame rate,
 // plus the AI input picture when an AI scene is live.
 import { drawAnyCover } from './sources.js';
-import { OUTPUT_FPS, OUTPUT_HEIGHT, OUTPUT_WIDTH } from './state.js';
+import { OUTPUT_FPS, output } from './state.js';
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -22,10 +22,10 @@ function drawNameTag(ctx, name, title) {
   const nameW = name ? ctx.measureText(name).width : 0;
   ctx.font = titleFont;
   const titleW = title ? ctx.measureText(title).width : 0;
-  const w = Math.min(OUTPUT_WIDTH * 0.6, Math.max(nameW, titleW) + padX * 2);
+  const w = Math.min(output.width * 0.8, Math.max(nameW, titleW) + padX * 2);
   const h = name && title ? 86 : 58;
   const x = 32;
-  const y = OUTPUT_HEIGHT - h - 32;
+  const y = output.height - h - 32;
 
   ctx.fillStyle = 'rgba(11, 12, 16, 0.82)';
   roundRect(ctx, x, y, w, h, 14);
@@ -48,14 +48,15 @@ function drawNameTag(ctx, name, title) {
 export class Compositor {
   constructor(canvas, aiCanvas, sources) {
     this.canvas = canvas;
-    this.canvas.width = OUTPUT_WIDTH;
-    this.canvas.height = OUTPUT_HEIGHT;
+    this.canvas.width = output.width;
+    this.canvas.height = output.height;
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.aiCanvas = aiCanvas;
     this.aiCtx = aiCanvas.getContext('2d', { alpha: false });
     this.sources = sources;
 
     this.mirror = false;
+    this.fit = 'fill';
     this.nameTag = null; // { name, title } or null
     this.aiFeed = false; // keep drawing the cloud AI input picture
     this.aiSource = null; // transformed picture: the cloud's video or the local engine's canvas
@@ -71,8 +72,9 @@ export class Compositor {
     this.timer = null;
   }
 
-  configure({ mirror, nameTag }) {
+  configure({ mirror, nameTag, fit }) {
     this.mirror = Boolean(mirror);
+    this.fit = fit === 'fit' ? 'fit' : 'fill';
     this.nameTag = nameTag && nameTag.enabled ? { name: nameTag.name, title: nameTag.title } : null;
   }
 
@@ -117,23 +119,30 @@ export class Compositor {
   drawAiInput() {
     if (!this.aiInputSize) return;
     const { width, height } = this.aiInputSize;
-    this.sources.draw(this.aiCtx, width, height, this.mirror);
+    // The cloud model works in landscape. For a portrait output it gets the whole picture centred,
+    // and the centre of its answer is cut back out, so nothing important is lost.
+    const fit = output.orientation === 'portrait' ? 'fit' : this.fit;
+    this.sources.draw(this.aiCtx, width, height, this.mirror, fit);
   }
 
   render() {
     const { ctx } = this;
-    const w = OUTPUT_WIDTH;
-    const h = OUTPUT_HEIGHT;
+    if (this.canvas.width !== output.width || this.canvas.height !== output.height) {
+      this.canvas.width = output.width;
+      this.canvas.height = output.height;
+    }
+    const w = output.width;
+    const h = output.height;
 
     if (this.aiFeed) this.drawAiInput();
-    if (this.beforeRender) this.beforeRender((c, cw, ch) => this.sources.draw(c, cw, ch, this.mirror));
+    if (this.beforeRender) this.beforeRender((c, cw, ch) => this.sources.draw(c, cw, ch, this.mirror, this.fit));
 
     let drewAi = false;
     if (this.aiSource && this.isAiLive()) {
       // The AI already received a mirrored picture when mirroring is on.
       drewAi = drawAnyCover(ctx, this.aiSource, w, h, false);
     }
-    if (!drewAi) this.sources.draw(ctx, w, h, this.mirror);
+    if (!drewAi) this.sources.draw(ctx, w, h, this.mirror, this.fit);
 
     if (this.nameTag) drawNameTag(ctx, this.nameTag.name, this.nameTag.title);
     if (this.afterRender) this.afterRender(this.canvas);

@@ -1,6 +1,6 @@
 // Local face swap adapter. Frames go to the face engine process; swapped faces come back and are
 // painted onto that same frame, so the face always lines up with the picture it was made from.
-import { OUTPUT_HEIGHT, OUTPUT_WIDTH } from './state.js';
+import { output } from './state.js';
 
 const FRESH_MS = 1000; // older results than this are not shown (the real picture shows instead)
 
@@ -25,12 +25,12 @@ export class LocalFaceAI {
 
     // What the engine is fed (mirrored like the output) and the finished picture.
     this.input = document.createElement('canvas');
-    this.input.width = OUTPUT_WIDTH;
-    this.input.height = OUTPUT_HEIGHT;
+    this.input.width = output.width;
+    this.input.height = output.height;
     this.inputCtx = this.input.getContext('2d', { willReadFrequently: true, alpha: false });
     this.canvas = document.createElement('canvas');
-    this.canvas.width = OUTPUT_WIDTH;
-    this.canvas.height = OUTPUT_HEIGHT;
+    this.canvas.width = output.width;
+    this.canvas.height = output.height;
     this.ctx = this.canvas.getContext('2d', { alpha: false });
     this.ctx.imageSmoothingQuality = 'high';
     this.faceCanvas = document.createElement('canvas');
@@ -195,8 +195,16 @@ export class LocalFaceAI {
   // Called by the compositor every frame with a function that draws the current source.
   tick(drawSource) {
     if (this.state !== 'generating' || !this.engineReady || this.inFlight) return;
-    drawSource(this.inputCtx, OUTPUT_WIDTH, OUTPUT_HEIGHT);
-    const image = this.inputCtx.getImageData(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+    if (this.input.width !== output.width || this.input.height !== output.height) {
+      // Picture shape changed: follow it (canvas contexts keep their settings).
+      this.input.width = output.width;
+      this.input.height = output.height;
+      this.canvas.width = output.width;
+      this.canvas.height = output.height;
+      this.ctx.imageSmoothingQuality = 'high';
+    }
+    drawSource(this.inputCtx, output.width, output.height);
+    const image = this.inputCtx.getImageData(0, 0, output.width, output.height);
     const id = ++this.frameId;
     this.inFlight = { id, image, sentAt: performance.now() };
     try {

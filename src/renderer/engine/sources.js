@@ -19,6 +19,42 @@ function drawCover(ctx, el, srcW, srcH, w, h, mirror) {
   return true;
 }
 
+// Whole picture visible, centred; the leftover area gets a soft, darkened, blown-up copy.
+const blurCanvas = document.createElement('canvas');
+const blurCtx = blurCanvas.getContext('2d');
+function drawFit(ctx, el, srcW, srcH, w, h, mirror) {
+  if (!srcW || !srcH) return false;
+  blurCanvas.width = 64;
+  blurCanvas.height = Math.max(1, Math.round((64 * h) / w));
+  // Blurring a tiny copy is cheap; scaling it up smooths it further.
+  blurCtx.filter = 'blur(3px)';
+  drawCover(blurCtx, el, srcW, srcH, blurCanvas.width, blurCanvas.height, mirror);
+  blurCtx.filter = 'none';
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(blurCanvas, 0, 0, w, h);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.fillRect(0, 0, w, h);
+  const scale = Math.min(w / srcW, h / srcH);
+  const dw = srcW * scale;
+  const dh = srcH * scale;
+  const dx = (w - dw) / 2;
+  const dy = (h - dh) / 2;
+  if (mirror) {
+    ctx.save();
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(el, w - dx - dw, dy, dw, dh);
+    ctx.restore();
+  } else {
+    ctx.drawImage(el, dx, dy, dw, dh);
+  }
+  return true;
+}
+
+function drawSized(ctx, el, srcW, srcH, w, h, mirror, fit) {
+  return fit === 'fit' ? drawFit(ctx, el, srcW, srcH, w, h, mirror) : drawCover(ctx, el, srcW, srcH, w, h, mirror);
+}
+
 export function drawVideoCover(ctx, video, w, h, mirror = false) {
   if (!video || video.readyState < 2) return false;
   return drawCover(ctx, video, video.videoWidth, video.videoHeight, w, h, mirror);
@@ -268,8 +304,8 @@ export class SourceManager {
     return el;
   }
 
-  // Draws the current source into ctx. Returns true when real content was drawn.
-  draw(ctx, w, h, mirror) {
+  // Draws the current source into ctx ('fill' crops to fill, 'fit' shows it all). True when real content was drawn.
+  draw(ctx, w, h, mirror, fit = 'fill') {
     const spec = this.spec;
     const cur = this.current;
     if (spec && cur && cur.kind === 'card') {
@@ -282,9 +318,9 @@ export class SourceManager {
     }
     let ok = false;
     if (cur.kind === 'image') {
-      ok = drawCover(ctx, cur.el, cur.el.naturalWidth, cur.el.naturalHeight, w, h, mirror);
-    } else {
-      ok = drawVideoCover(ctx, cur.el, w, h, mirror);
+      ok = drawSized(ctx, cur.el, cur.el.naturalWidth, cur.el.naturalHeight, w, h, mirror, fit);
+    } else if (cur.el.readyState >= 2) {
+      ok = drawSized(ctx, cur.el, cur.el.videoWidth, cur.el.videoHeight, w, h, mirror, fit);
     }
     if (!ok) drawPlaceholder(ctx, w, h, 'Waiting for frames…');
     return ok;

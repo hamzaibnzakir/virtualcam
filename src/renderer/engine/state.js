@@ -1,7 +1,14 @@
 // Scene data model, defaults and loading of saved state.
 
-export const OUTPUT_WIDTH = 1280;
-export const OUTPUT_HEIGHT = 720;
+// The picture size everything is drawn at. Landscape for calls, portrait for phone-style video.
+export const output = { width: 1280, height: 720, orientation: 'landscape' };
+export function setOrientation(orientation) {
+  const portrait = orientation === 'portrait';
+  output.orientation = portrait ? 'portrait' : 'landscape';
+  output.width = portrait ? 720 : 1280;
+  output.height = portrait ? 1280 : 720;
+  return output;
+}
 export const OUTPUT_FPS = 30;
 
 export const SOURCE_TYPES = ['webcam', 'image', 'video', 'screen', 'card'];
@@ -31,6 +38,7 @@ export function makeScene(overrides = {}) {
     id: newId(),
     name: 'New scene',
     mirror: false,
+    fit: 'fill',
     source: { type: 'webcam', deviceId: '', filePath: '', text: 'Be right back', color: '#1B1E27' },
     ai: { enabled: false, engine: 'cloud', mode: 'restyle', prompt: '', enhance: true, referencePath: '' },
     nameTag: { enabled: false, name: '', title: '' },
@@ -68,7 +76,7 @@ export function defaultState() {
 }
 
 function defaultSettings() {
-  return { pricePerSecond: 0, faceBoost: false, cameraOutput: true };
+  return { pricePerSecond: 0, faceBoost: false, cameraOutput: true, orientation: 'landscape' };
 }
 
 function str(value, fallback = '', max = 2000) {
@@ -88,6 +96,7 @@ export function normalizeScene(raw) {
     id: str(s.id) || newId(),
     name: str(s.name, 'Scene', 60) || 'Scene',
     mirror: Boolean(s.mirror),
+    fit: s.fit === 'fit' ? 'fit' : 'fill',
     source: {
       type: SOURCE_TYPES.includes(src.type) ? src.type : 'webcam',
       deviceId: str(src.deviceId),
@@ -134,6 +143,7 @@ export function normalizeState(raw) {
       pricePerSecond: Number.isFinite(price) && price >= 0 ? price : 0,
       faceBoost: Boolean(rawSettings.faceBoost),
       cameraOutput: rawSettings.cameraOutput !== false,
+      orientation: rawSettings.orientation === 'portrait' ? 'portrait' : 'landscape',
     },
   };
 }

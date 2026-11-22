@@ -7,8 +7,8 @@ import { SourceManager } from './engine/sources.js';
 import {
   CHARACTER_PROMPT,
   OUTPUT_FPS,
-  OUTPUT_HEIGHT,
-  OUTPUT_WIDTH,
+  output,
+  setOrientation,
   PRESETS,
   isPhoneCamera,
   fileName,
@@ -36,7 +36,7 @@ let cloudState = 'off';
 let hardware = null;
 let models = { core: false, boost: false, coreBytes: 0, boostBytes: 0, busy: false };
 let download = null; // { pack, done, total, file }
-let cameraState = { supported: false, installed: false, running: false, inUse: false, message: '' };
+let cameraState = { supported: false, installed: false, running: false, inUse: false, message: '', width: 0, height: 0 };
 const refCache = new Map(); // reference image path -> Blob
 
 // ---------- engine ----------
@@ -145,7 +145,7 @@ async function applyScene() {
   const token = ++applyToken;
   const scene = override ? realCameraScene() : activeScene();
 
-  compositor.configure({ mirror: scene.mirror, nameTag: scene.nameTag });
+  compositor.configure({ mirror: scene.mirror, nameTag: scene.nameTag, fit: scene.fit });
   sources.use(scene.source);
 
   const wantAi = scene.ai.enabled;
@@ -296,6 +296,7 @@ function renderInspector() {
   syncField($('card-text'), scene.source.text, sceneChanged);
   $('card-color').value = scene.source.color;
   setPressed($('toggle-mirror'), scene.mirror);
+  setPressed($('toggle-fit'), scene.fit === 'fit');
 
   setPressed($('toggle-ai'), scene.ai.enabled);
   $('ai-engine').value = scene.ai.engine;
@@ -567,16 +568,20 @@ function openOutput() {
 // ---------- VirtualCam camera device ----------
 
 const camCanvas = document.createElement('canvas');
-camCanvas.width = OUTPUT_WIDTH;
-camCanvas.height = OUTPUT_HEIGHT;
 const camCtx = camCanvas.getContext('2d', { willReadFrequently: true, alpha: false });
-const camFrame = new Uint8Array(OUTPUT_WIDTH * OUTPUT_HEIGHT * 3);
+let camFrame = new Uint8Array(0);
 
 // Only spends time on frames while some app is actually showing the camera.
 function sendCameraFrame(canvas) {
   if (!cameraState.running || !cameraState.inUse || !state || !state.settings.cameraOutput) return;
+  if (canvas.width !== cameraState.width || canvas.height !== cameraState.height) return; // camera restarting
+  if (camCanvas.width !== canvas.width || camCanvas.height !== canvas.height) {
+    camCanvas.width = canvas.width;
+    camCanvas.height = canvas.height;
+  }
+  if (camFrame.length !== canvas.width * canvas.height * 3) camFrame = new Uint8Array(canvas.width * canvas.height * 3);
   camCtx.drawImage(canvas, 0, 0);
-  const rgba = camCtx.getImageData(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT).data;
+  const rgba = camCtx.getImageData(0, 0, canvas.width, canvas.height).data;
   for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
     camFrame[j] = rgba[i + 2];
     camFrame[j + 1] = rgba[i + 1];
@@ -607,7 +612,7 @@ function renderCamera() {
 
 async function syncCamera() {
   if (!cameraState.supported) return;
-  if (cameraState.installed && state.settings.cameraOutput) await api.cameraStart(OUTPUT_WIDTH, OUTPUT_HEIGHT);
+  if (cameraState.installed && state.settings.cameraOutput) await api.cameraStart(output.width, output.height);
   else await api.cameraStop();
 }
 
@@ -704,6 +709,22 @@ function bindEvents() {
   $('card-color').addEventListener('input', (e) => {
     activeScene().source.color = e.target.value;
     changed();
+  });
+
+  $('toggle-fit').addEventListener('click', () => {
+    const scene = activeScene();
+    scene.fit = scene.fit === 'fit' ? 'fill' : 'fit';
+    changed();
+  });
+
+  $('output-shape').addEventListener('change', async (e) => {
+    state.settings.orientation = e.target.value === 'portrait' ? 'portrait' : 'landscape';
+    applyOrientation();
+    scheduleSave();
+    await syncCamera();
+    if (cameraState.installed && state.settings.cameraOutput) {
+      showToast('Picture shape changed. If a call is already using VirtualCam, pick the camera again there.');
+    }
   });
 
   $('toggle-mirror').addEventListener('click', () => {
@@ -918,8 +939,16 @@ async function reportHotkeyFailures() {
 
 // ---------- start ----------
 
+function applyOrientation() {
+  setOrientation(state.settings.orientation);
+  $('output-shape').value = output.orientation;
+  $('program').closest('.preview').classList.toggle('portrait', output.orientation === 'portrait');
+  // The cloud AI's own size never changes, so it keeps running across the switch.
+}
+
 async function start() {
   state = normalizeState(await api.loadState());
+  applyOrientation();
   labelHotkeys();
   bindEvents();
   compositor.start();
@@ -1119,6 +1148,56 @@ async function runSmokeTest() {
       if (!(local.lastResultAt > 0)) failures.push('local face swap produced no result');
     }
 
+
+    // Portrait output: every engine and the camera follow the new shape; 'fit' shows the whole picture.
+    if (api.smokeFiles && api.smokeFiles.face && api.smokeFiles.ref) {
+      const select = $('output-shape');
+      select.value = 'portrait';
+      select.dispatchEvent(new Event('change'));
+      const portraitStep = { step: 'portrait' };
+      const liteScene = state.scenes.find((s) => s.name === 'Smoke lite warp');
+      liteScene.fit = 'fit';
+      selectScene(liteScene.id);
+      const startFrame = lite.frame;
+      const until = Date.now() + 60000;
+      while (Date.now() < until && lite.frame < startFrame + 5) await wait(250);
+      const program = $('program');
+      portraitStep.program = `${program.width}x${program.height}`;
+      portraitStep.lite = `${lite.canvas.width}x${lite.canvas.height}`;
+      portraitStep.liteFace = lite.faceFound;
+      // Top-left corner should be the soft blurred fill, not the empty-source placeholder.
+      probeCtx.drawImage(program, 4, 4, 1, 1, 0, 0, 1, 1);
+      const corner = probeCtx.getImageData(0, 0, 1, 1).data;
+      portraitStep.corner = [corner[0], corner[1], corner[2]];
+      portraitStep.ok = program.width === 720 && program.height === 1280 && lite.canvas.width === 720 && lite.faceFound;
+      if (cameraState.supported && cameraState.installed) {
+        const until2 = Date.now() + 15000;
+        while (Date.now() < until2 && !(cameraState.running && cameraState.width === 720)) await wait(250);
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const vc = devices.find((d) => d.kind === 'videoinput' && /virtualcam/i.test(d.label));
+        if (vc) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: vc.deviceId } } });
+          const video = document.createElement('video');
+          video.muted = true;
+          video.srcObject = stream;
+          $('stage').append(video);
+          await video.play();
+          await wait(2500);
+          portraitStep.camera = `${video.videoWidth}x${video.videoHeight}`;
+          stream.getTracks().forEach((t) => t.stop());
+          video.remove();
+          portraitStep.ok = portraitStep.ok && video.videoWidth === 720 && video.videoHeight === 1280;
+        } else {
+          portraitStep.ok = false;
+          portraitStep.camera = 'not listed';
+        }
+      }
+      report.steps.push(portraitStep);
+      if (!portraitStep.ok) failures.push('portrait output did not work everywhere');
+      select.value = 'landscape';
+      select.dispatchEvent(new Event('change'));
+      await wait(500);
+    }
 
     report.ok = failures.length === 0;
     if (failures.length) report.error = failures.join('; ');

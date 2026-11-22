@@ -20,7 +20,15 @@ class CameraDriver {
     this.binDir = binDir; // contains x64\softcam.dll, x64\vcam-bridge.exe, x86\softcam.dll
     this.onState = onState || (() => {});
     this.bridge = null;
-    this.state = { supported: process.platform === 'win32', installed: false, running: false, inUse: false, message: '' };
+    this.state = {
+      supported: process.platform === 'win32',
+      installed: false,
+      running: false,
+      inUse: false,
+      message: '',
+      width: 0,
+      height: 0,
+    };
     this.width = 0;
     this.height = 0;
     this.dropped = 0;
@@ -79,7 +87,7 @@ class CameraDriver {
     lines.push('exit 0');
     const script = path.join(require('node:os').tmpdir(), `virtualcam-${install ? 'install' : 'uninstall'}-${process.pid}.ps1`);
     fs.writeFileSync(script, lines.join('\r\n'));
-    if (!install) this.stop();
+    if (!install) await this.stop();
     const outer =
       `$p = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden ` +
       `-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','"${esc(script)}"'; exit $p.ExitCode`;
@@ -92,10 +100,11 @@ class CameraDriver {
     return this.state;
   }
 
-  start(width, height) {
+  async start(width, height) {
     if (!this.state.supported || !this.state.installed) return false;
     if (this.bridge && this.width === width && this.height === height) return true;
-    this.stop();
+    // Only one program can feed the camera at a time, so the old bridge must be gone first.
+    await this.stop();
     this.width = width;
     this.height = height;
     const child = spawn(this.files().bridge, [String(width), String(height)], {
@@ -111,7 +120,7 @@ class CameraDriver {
       while ((nl = buffered.indexOf('\n')) >= 0) {
         const line = buffered.slice(0, nl).trim();
         buffered = buffered.slice(nl + 1);
-        if (line === 'ready') this.emit({ running: true, message: '' });
+        if (line === 'ready') this.emit({ running: true, message: '', width: this.width, height: this.height });
         else if (line === 'connected') this.emit({ inUse: true });
         else if (line === 'disconnected') this.emit({ inUse: false });
         else if (line.startsWith('error')) this.emit({ message: line.slice(6) });
@@ -129,20 +138,24 @@ class CameraDriver {
     return true;
   }
 
+  // Resolves once the bridge has exited (it is killed if it hasn't closed within 1.5 s).
   stop() {
     const child = this.bridge;
     this.bridge = null;
-    if (child) {
+    this.emit({ running: false, inUse: false });
+    if (!child || child.exitCode !== null) return Promise.resolve();
+    return new Promise((resolve) => {
+      const killer = setTimeout(() => child.kill(), 1500);
+      child.once('exit', () => {
+        clearTimeout(killer);
+        resolve();
+      });
       try {
         child.stdin.end();
       } catch {
-        // already gone
+        child.kill();
       }
-      setTimeout(() => {
-        if (child.exitCode === null) child.kill();
-      }, 1500);
-    }
-    this.emit({ running: false, inUse: false });
+    });
   }
 
   // frame: BGR bytes, width*height*3. Frames are dropped while the camera is busy taking the last one.

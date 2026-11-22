@@ -18,7 +18,11 @@
     </div>
     <div class="pill" id="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">Starting…</span></div>
     <div class="spacer"></div>
-    <span class="muted">1280×720 · 30 fps</span>
+    <label class="sr-only" for="output-shape">Picture shape</label>
+    <select id="output-shape" class="shape-select" title="Picture shape">
+      <option value="landscape">Landscape · 1280×720</option>
+      <option value="portrait">Portrait · 720×1280</option>
+    </select>
     <button type="button" class="btn" id="btn-camera" hidden>Install VirtualCam camera</button>
     <button type="button" class="btn" id="btn-output">Open output window</button>
     <button type="button" class="btn btn-danger" id="btn-panic">Back to real camera <kbd id="kbd-panic">Ctrl Alt 0</kbd></button>
@@ -126,6 +130,11 @@
           <input id="card-text" type="text" maxlength="120" autocomplete="off">
           <label for="card-color">Background</label>
           <input id="card-color" type="color">
+        </div>
+
+        <div class="toggle-row">
+          <span id="fit-label">Show the whole picture <span class="muted small">(no cropping)</span></span>
+          <button type="button" class="switch" id="toggle-fit" aria-labelledby="fit-label"><span></span></button>
         </div>
 
         <div class="toggle-row">

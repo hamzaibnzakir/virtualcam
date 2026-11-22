@@ -395,8 +395,8 @@ function registerIpc() {
   ipcMain.handle('camera:install', () => camera.setInstalled(true));
   ipcMain.handle('camera:uninstall', () => camera.setInstalled(false));
   ipcMain.handle('camera:start', (_e, width, height) => camera.start(Number(width), Number(height)));
-  ipcMain.handle('camera:stop', () => {
-    camera.stop();
+  ipcMain.handle('camera:stop', async () => {
+    await camera.stop();
     return true;
   });
   ipcMain.on('camera:frame', (_e, frame) => {

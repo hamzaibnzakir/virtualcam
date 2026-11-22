@@ -8,7 +8,7 @@
 //      the edges. Triangles that turn away from the camera fade out instead of smearing.
 import { FaceLandmarker } from '@mediapipe/tasks-vision';
 import Delaunator from 'delaunator';
-import { OUTPUT_HEIGHT, OUTPUT_WIDTH } from './state.js';
+import { output } from './state.js';
 
 const FRESH_MS = 1000;
 // How much of the camera's lighting and skin detail is laid over the photo's face.
@@ -279,8 +279,8 @@ export class LiteFaceAI {
     this.smoother = new OneEuro();
 
     this.input = document.createElement('canvas');
-    this.input.width = OUTPUT_WIDTH;
-    this.input.height = OUTPUT_HEIGHT;
+    this.input.width = output.width;
+    this.input.height = output.height;
     this.inputCtx = this.input.getContext('2d', { alpha: false, willReadFrequently: true });
     this.small = document.createElement('canvas');
     this.small.width = 320;
@@ -288,8 +288,8 @@ export class LiteFaceAI {
     this.smallCtx = this.small.getContext('2d', { willReadFrequently: true });
 
     this.canvas = document.createElement('canvas');
-    this.canvas.width = OUTPUT_WIDTH;
-    this.canvas.height = OUTPUT_HEIGHT;
+    this.canvas.width = output.width;
+    this.canvas.height = output.height;
   }
 
   setState(state) {
@@ -491,7 +491,16 @@ export class LiteFaceAI {
   tick(drawSource) {
     if (this.state !== 'generating' || !this.ready || !this.source) return;
     const started = performance.now();
-    drawSource(this.inputCtx, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+    if (this.input.width !== output.width || this.input.height !== output.height) {
+      // Picture shape changed: follow it and restart smoothing (all points just moved).
+      this.input.width = output.width;
+      this.input.height = output.height;
+      this.canvas.width = output.width;
+      this.canvas.height = output.height;
+      this.smoother.reset();
+      this.dstStats = null;
+    }
+    drawSource(this.inputCtx, output.width, output.height);
     const ts = Math.max(this.lastTs + 1, Math.floor(started));
     this.lastTs = ts;
     let landmarks = null;
@@ -508,8 +517,8 @@ export class LiteFaceAI {
     if (landmarks) {
       const raw = new Float32Array(MESH_POINTS * 2);
       for (let i = 0; i < MESH_POINTS; i += 1) {
-        raw[i * 2] = landmarks[i].x * OUTPUT_WIDTH;
-        raw[i * 2 + 1] = landmarks[i].y * OUTPUT_HEIGHT;
+        raw[i * 2] = landmarks[i].x * output.width;
+        raw[i * 2 + 1] = landmarks[i].y * output.height;
       }
       points = this.smoother.filter(raw, started);
       if (this.frame % 4 === 0 || !this.dstStats) this.updateDstStats(points);
@@ -529,8 +538,15 @@ export class LiteFaceAI {
   }
 
   updateDstStats(points) {
-    const sx = this.small.width / OUTPUT_WIDTH;
-    const sy = this.small.height / OUTPUT_HEIGHT;
+    // Keep the colour sample canvas the same shape as the picture.
+    const smallW = output.width >= output.height ? 320 : 180;
+    const smallH = output.width >= output.height ? 180 : 320;
+    if (this.small.width !== smallW || this.small.height !== smallH) {
+      this.small.width = smallW;
+      this.small.height = smallH;
+    }
+    const sx = this.small.width / output.width;
+    const sy = this.small.height / output.height;
     this.smallCtx.drawImage(this.input, 0, 0, this.small.width, this.small.height);
     const data = this.smallCtx.getImageData(0, 0, this.small.width, this.small.height).data;
     const oval = FACE_OVAL.map((i) => [points[i * 2] * sx, points[i * 2 + 1] * sy]);
@@ -540,7 +556,7 @@ export class LiteFaceAI {
 
   render(points) {
     const gl = this.gl;
-    gl.viewport(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+    gl.viewport(0, 0, output.width, output.height);
     gl.disable(gl.BLEND);
 
     gl.activeTexture(gl.TEXTURE1);
@@ -588,7 +604,7 @@ export class LiteFaceAI {
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
     gl.uniform1i(this.loc.uSrc, 0);
     gl.uniform1i(this.loc.uFrame, 1);
-    gl.uniform2f(this.loc.uViewport, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+    gl.uniform2f(this.loc.uViewport, output.width, output.height);
     gl.uniform3fv(this.loc.uSrcMean, src.stats.mean);
     gl.uniform3fv(this.loc.uSrcStd, src.stats.std);
     gl.uniform3fv(this.loc.uDstMean, this.dstStats.mean);
