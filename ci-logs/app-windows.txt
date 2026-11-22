@@ -24,7 +24,7 @@ Downloading Electron binary...
     {
       "step": "ai-without-key",
       "aiState": "needs-key",
-      "fps": 29,
+      "fps": 32,
       "ready": true,
       "message": "",
       "pixel": [
@@ -35,7 +35,7 @@ Downloading Electron binary...
     },
     {
       "step": "card",
-      "fps": 30,
+      "fps": 32,
       "ready": true,
       "message": "",
       "pixel": [
@@ -47,19 +47,19 @@ Downloading Electron binary...
     {
       "step": "panic",
       "override": true,
-      "fps": 30,
+      "fps": 31,
       "ready": true,
       "message": "",
       "pixel": [
-        218,
-        241,
-        219
+        217,
+        242,
+        218
       ]
     },
     {
       "step": "new-scene-nametag",
       "scenes": 6,
-      "fps": 31,
+      "fps": 30,
       "ready": true,
       "message": "",
       "pixel": [
@@ -87,7 +87,7 @@ Downloading Electron binary...
       "step": "ai-bad-key",
       "aiState": "error",
       "toast": "Could not start AI: Invalid API key",
-      "fps": 18,
+      "fps": 17,
       "ready": true,
       "message": "",
       "pixel": [
@@ -119,24 +119,24 @@ Downloading Electron binary...
       "delegate": "GPU",
       "faceFound": true,
       "frames": 11,
-      "ms": 109,
+      "ms": 115,
       "fps": 7
     },
     {
       "step": "model-download",
       "ok": true,
-      "seconds": 16
+      "seconds": 18
     },
     {
       "step": "local-swap",
       "models": true,
       "aiState": "generating",
       "provider": "cpu",
-      "gpuFallback": "dml: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFA8D05A880: (caller: 00007FFA8D05AB8A) Exception(1) tid(1e6c) C0262002 Specified display adapter handle is invalid.\r\n",
+      "gpuFallback": "dml: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFF595BA880: (caller: 00007FFF595BAB8A) Exception(1) tid(2260) C0262002 Specified display adapter handle is invalid.\r\n",
       "swapped": true,
-      "live": false,
+      "live": true,
       "meanFaceChange": 8,
-      "ms": 2354,
+      "ms": 4479,
       "hardware": "cpu-only"
     },
     {
@@ -149,22 +149,22 @@ Downloading Electron binary...
         24,
         29
       ],
-      "ok": false,
-      "camera": "1280x720"
+      "ok": true,
+      "bridge": "720x1280",
+      "chromiumSees": "1280x720"
     }
   ],
-  "ok": false,
-  "error": "portrait output did not work everywhere"
+  "ok": true
 }
 Quick switcher: [switcher] rows=5
 Console warnings: [
-  'W1122 07:34:05.809999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1122 07:34:05.849999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1122 07:34:05.980000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1122 07:34:05.999000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1122 07:34:06.079000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1122 07:34:06.095000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.'
+  'W1122 07:37:47.984000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1122 07:37:48.025999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 07:37:48.132999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1122 07:37:48.153999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 07:37:48.243000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1122 07:37:48.259000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.'
 ]
-SMOKE FAILED
+SMOKE PASSED
 
-RESULT smoke=failure installer=skipped
+RESULT smoke=success installer=success
