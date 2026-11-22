@@ -3,6 +3,8 @@
 This folder is [Softcam](https://github.com/tshino/softcam) by tshino (MIT license, see `LICENSE`),
 vendored from commit d1acde4 with these changes only:
 
+- Release builds link the C++ runtime statically, so no Visual C++ redistributable is needed.
+
 - The camera is named **VirtualCam** (was "DirectShow Softcam").
 - It has its own class ID and shared-memory names, so it never clashes with other Softcam-based cameras.
 - Visual Studio 2019 project files and the upstream tests/examples were left out.

@@ -44,6 +44,7 @@ Log ("Windows: " + (Get-CimInstance Win32_OperatingSystem).Caption + " build " +
 foreach ($f in @("$Bin\x64\softcam.dll", "$Bin\x64\vcam-bridge.exe", "$Bin\x86\softcam.dll")) {
   $deps = (& dumpbin /nologo /dependents $f) -match '\.dll' | ForEach-Object { $_.Trim() }
   Log ("deps of " + (Split-Path $f -Leaf) + " (" + (Split-Path (Split-Path $f) -Leaf) + "): " + ($deps -join ', '))
+  if (($deps -join ' ') -match 'MSVCP140|VCRUNTIME140|api-ms-win-crt') { Fail "$f needs the Visual C++ runtime installed" } else { Pass "$(Split-Path $f -Leaf) runs without extra runtimes" }
 }
 
 # --- 1. register 64-bit and 32-bit ---
