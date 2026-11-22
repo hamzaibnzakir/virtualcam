@@ -57,6 +57,19 @@ function modelsDir() {
   return process.env.VCAM_MODELS_DIR || path.join(app.getPath('userData'), 'models');
 }
 
+// The face engine's log, started fresh when it grows past 1 MB.
+function engineLogFile() {
+  const dir = app.getPath('logs');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'face-engine.log');
+  try {
+    if (fs.statSync(file).size > 1024 * 1024) fs.renameSync(file, path.join(dir, 'face-engine.old.log'));
+  } catch {
+    // no log yet
+  }
+  return file;
+}
+
 // Camera files ship in resources/vendor/win when packaged, and in the repo's vendor/win in development.
 function vendorDir() {
   const packaged = path.join(process.resourcesPath || '', 'vendor', 'win');
@@ -342,12 +355,19 @@ function registerIpc() {
   ipcMain.handle('faceengine:start', () => {
     if (!mainWindow) return { ok: false };
     if (!faceWorker) {
+      const logFile = engineLogFile();
       faceWorker = utilityProcess.fork(path.join(__dirname, 'faceswap', 'worker.js'), [], {
         serviceName: 'VirtualCam Face Engine',
-        stdio: 'ignore',
+        stdio: 'pipe',
+        env: { ...process.env, VCAM_ENGINE_LOG: logFile },
       });
       const worker = faceWorker;
+      // Anything the engine or the AI runtime prints (including native errors) goes to the log too.
+      const append = (chunk) => fs.promises.appendFile(logFile, chunk).catch(() => {});
+      if (worker.stdout) worker.stdout.on('data', append);
+      if (worker.stderr) worker.stderr.on('data', append);
       worker.on('exit', (code) => {
+        append(`[${new Date().toISOString()}] face engine exited with code ${code}\n`);
         if (faceWorker === worker) faceWorker = null;
         sendToStudio('faceengine:exit', { code });
       });
@@ -359,6 +379,13 @@ function registerIpc() {
     return { ok: true, modelsDir: modelsDir() };
   });
 
+  ipcMain.handle('faceengine:log', () => {
+    const file = engineLogFile();
+    if (fs.existsSync(file)) shell.showItemInFolder(file);
+    else shell.openPath(path.dirname(file));
+    return file;
+  });
+
   ipcMain.handle('faceengine:stop', () => {
     if (faceWorker) faceWorker.kill();
     faceWorker = null;
@@ -366,7 +393,12 @@ function registerIpc() {
   });
 
   ipcMain.handle('hardware:check', async () => {
-    if (!hardwareCache) hardwareCache = await checkHardware(app);
+    if (!hardwareCache) {
+      hardwareCache = await checkHardware(app);
+      fs.promises
+        .appendFile(engineLogFile(), `[${new Date().toISOString()}] hardware check: ${JSON.stringify(hardwareCache)}\n`)
+        .catch(() => {});
+    }
     return hardwareCache;
   });
 

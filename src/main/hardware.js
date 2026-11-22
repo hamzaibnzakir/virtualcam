@@ -7,12 +7,33 @@ const { execFile } = require('node:child_process');
 const MIN_VRAM_MB = 2048; // the local models need about 2 GB of graphics memory
 const MIN_WIN_BUILD = 18362; // DirectML needs Windows 10 version 1903 or newer
 
-function run(cmd, args, timeout = 8000) {
+// Keeps whatever the command printed even when it ends with an error: PowerShell reports a failure
+// when one registry key is off-limits to normal accounts, but still prints the rest.
+function run(cmd, args, timeout = 25000) {
   return new Promise((resolve) => {
-    execFile(cmd, args, { timeout, windowsHide: true, maxBuffer: 1024 * 1024 }, (err, stdout) => {
-      resolve(err ? '' : String(stdout));
+    execFile(cmd, args, { timeout, windowsHide: true, maxBuffer: 1024 * 1024 }, (_err, stdout) => {
+      resolve(String(stdout || ''));
     });
   });
+}
+
+function parseJsonList(out) {
+  const text = String(out || '').trim();
+  const start = text.search(/[[{]/);
+  if (start < 0) return [];
+  try {
+    const parsed = JSON.parse(text.slice(start));
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [];
+  }
+}
+
+function powershell(script) {
+  const exe = process.env.SystemRoot
+    ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+    : 'powershell.exe';
+  return run(exe, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script]);
 }
 
 // Graphics cards and their dedicated memory, read from the Windows registry
@@ -25,23 +46,63 @@ async function windowsGpus() {
     "  $q = $p.'HardwareInformation.qwMemorySize'",
     "  $m = $p.'HardwareInformation.MemorySize'",
     "  if ($m -is [byte[]]) { $m = [BitConverter]::ToUInt32($m, 0) }",
-    "  [pscustomobject]@{ name = $p.DriverDesc; bytes = if ($q) { [double]$q } elseif ($m) { [double]$m } else { 0 } }",
+    "  if ($p.DriverDesc) { [pscustomobject]@{ name = $p.DriverDesc; bytes = if ($q) { [double]$q } elseif ($m) { [double]$m } else { 0 } } }",
     "} | ConvertTo-Json -Compress",
+    'exit 0',
   ].join('\n');
-  const out = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script]);
+  return parseJsonList(await powershell(script))
+    .filter((g) => g && g.name)
+    .map((g) => ({ name: String(g.name), vramMB: Math.round(Number(g.bytes || 0) / (1024 * 1024)) }));
+}
+
+// Second opinion from WMI (its memory figure stops at 4 GB, which is enough to judge by).
+async function windowsGpusWmi() {
+  const script = [
+    'Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | ForEach-Object {',
+    '  [pscustomobject]@{ name = $_.Name; bytes = [double]($_.AdapterRAM) }',
+    '} | ConvertTo-Json -Compress',
+    'exit 0',
+  ].join('\n');
+  return parseJsonList(await powershell(script))
+    .filter((g) => g && g.name)
+    .map((g) => ({ name: String(g.name), vramMB: Math.round(Number(g.bytes || 0) / (1024 * 1024)) }));
+}
+
+const VENDORS = { 0x10de: 'NVIDIA', 0x1002: 'AMD', 0x8086: 'Intel', 0x1414: 'Microsoft Basic' };
+
+// Last resort: the graphics chips Chromium sees (names only, no memory figure).
+async function chromiumGpus(electronApp) {
+  if (!electronApp) return [];
   try {
-    const parsed = JSON.parse(out.trim() || '[]');
-    const list = Array.isArray(parsed) ? parsed : [parsed];
-    return list
-      .filter((g) => g && g.name)
-      .map((g) => ({ name: String(g.name), vramMB: Math.round(Number(g.bytes || 0) / (1024 * 1024)) }));
+    const info = await electronApp.getGPUInfo('basic');
+    return ((info && info.gpuDevice) || []).map((d) => ({
+      name: d.deviceString || `${VENDORS[d.vendorId] || 'Unknown'} graphics (${Number(d.deviceId).toString(16)})`,
+      vramMB: 0,
+    }));
   } catch {
     return [];
   }
 }
 
+// Merge lists by name, keeping the largest memory figure for each card.
+function mergeGpus(...lists) {
+  const byName = new Map();
+  for (const list of lists) {
+    for (const g of list) {
+      const key = g.name.trim().toLowerCase();
+      const prev = byName.get(key);
+      if (!prev || g.vramMB > prev.vramMB) byName.set(key, { name: g.name.trim(), vramMB: g.vramMB });
+    }
+  }
+  return [...byName.values()];
+}
+
 function isIntegrated(name) {
-  return /intel\(r\) (uhd|hd|iris)|intel (uhd|hd|iris)|microsoft basic|radeon\(tm\) graphics$|vega \d+ graphics/i.test(name);
+  return /intel\(r\) (uhd|hd|iris)|intel (uhd|hd|iris)|^intel graphics|microsoft basic|microsoft remote|radeon\(tm\) graphics$|vega \d+ graphics/i.test(name);
+}
+
+function isDedicatedBrand(name) {
+  return /nvidia|geforce|quadro|rtx|gtx|radeon (rx|pro)|amd radeon|\barc\b/i.test(name);
 }
 
 async function checkHardware(electronApp) {
@@ -58,7 +119,10 @@ async function checkHardware(electronApp) {
   if (platform === 'win32') {
     const build = Number(os.release().split('.')[2] || 0);
     result.windowsBuild = build;
-    result.gpus = await windowsGpus();
+    const [registry, wmi] = await Promise.all([windowsGpus(), windowsGpusWmi()]);
+    result.gpus = mergeGpus(registry, wmi);
+    if (!result.gpus.length) result.gpus = await chromiumGpus(electronApp);
+    result.sources = { registry: registry.length, wmi: wmi.length };
     if (build && build < MIN_WIN_BUILD) {
       result.verdict = 'unsupported';
       result.message = 'Local AI needs Windows 10 version 1903 or newer. Use the cloud AI instead.';
@@ -79,8 +143,12 @@ async function checkHardware(electronApp) {
 
   if (platform === 'win32') {
     if (result.best && !isIntegrated(result.best.name) && result.best.vramMB >= MIN_VRAM_MB) {
-      result.verdict = result.best.vramMB >= 4096 ? 'great' : 'ok';
+      // WMI caps memory at 4 GB, so a 4 GB card can read as 3.99.
+      result.verdict = result.best.vramMB >= 4000 ? 'great' : 'ok';
       result.message = `${result.best.name} with ${(result.best.vramMB / 1024).toFixed(1)} GB can run the local face swap.`;
+    } else if (result.best && !isIntegrated(result.best.name) && !result.best.vramMB && isDedicatedBrand(result.best.name)) {
+      result.verdict = 'ok';
+      result.message = `${result.best.name} found. Its memory size couldn't be read, but it should run the local face swap.`;
     } else if (result.best) {
       result.verdict = 'cpu-only';
       result.message = `${result.best.name} is below the 2 GB graphics memory the local AI needs. It will run, but slowly. The cloud AI is recommended.`;

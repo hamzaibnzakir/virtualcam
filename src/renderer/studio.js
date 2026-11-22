@@ -74,6 +74,9 @@ const local = new LocalFaceAI({
     }
     renderLocal();
   },
+  onProgress: () => {
+    if (activeEngine === 'local') renderAi();
+  },
   onError: (message) => showToast(message, true),
 });
 
@@ -378,6 +381,7 @@ function renderAi() {
   let [text, tone] = AI_TEXT[showing] || [showing, ''];
   if (activeEngine === 'local' && showing === 'generating') text = 'Local face swap live';
   if (activeEngine === 'local' && showing === 'error') text = 'The local face engine hit a problem';
+  if (activeEngine === 'local' && (showing === 'starting' || showing === 'loading') && local.step) text = `Local AI: ${local.step}…`;
   if (activeEngine === 'lite' && showing === 'generating') text = lite.faceFound ? 'Lite face warp live' : 'Lite: looking for your face…';
   if (activeEngine === 'lite' && showing === 'starting') text = 'Starting face tracking…';
   if (activeEngine === 'lite' && showing === 'error') text = 'Lite face warp hit a problem';
@@ -444,7 +448,7 @@ function renderLocal() {
     : '';
   const live = activeEngine === 'local' && local.state === 'generating';
   $('local-stats').textContent = live
-    ? `${local.stats.fps} swaps per second · ${local.stats.ms} ms each · running on ${local.provider === 'dml' ? 'your graphics card' : local.provider === 'coreml' ? 'your Mac' : 'the processor'}`
+    ? `${local.stats.fps} swaps per second · ${local.stats.ms} ms each · running on ${local.deviceLabel || (local.provider === 'dml' ? 'your graphics card' : local.provider === 'coreml' ? 'your Mac' : 'the processor')}${local.tried.filter((t) => !t.error).length > 1 ? ` (the fastest of ${local.tried.filter((t) => !t.error).length} tried)` : ''}`
     : '';
 }
 
@@ -806,6 +810,7 @@ function bindEvents() {
     changed();
   });
   $('btn-models').addEventListener('click', () => startDownload('core'));
+  $('btn-engine-log').addEventListener('click', () => api.showEngineLog());
   $('btn-boost-download').addEventListener('click', () => startDownload('boost'));
   $('toggle-boost').addEventListener('click', () => {
     if (!state.settings.faceBoost && !models.boost) {
@@ -979,6 +984,7 @@ async function start() {
 
   api.hardwareCheck().then((info) => {
     hardware = info;
+    local.gpuCount = ((info && info.gpus) || []).filter((g) => !/microsoft (basic|remote)/i.test(g.name)).length;
     renderLocal();
   });
   refreshModels();
@@ -1144,6 +1150,10 @@ async function runSmokeTest() {
         meanFaceChange: Math.round(diff / (80 * 80 * 3)),
         ms: local.stats.ms,
         hardware: hardware && hardware.verdict,
+        gpus: hardware && hardware.gpus,
+        gpuSources: hardware && hardware.sources,
+        device: local.deviceLabel,
+        tried: local.tried,
       });
       if (!(local.lastResultAt > 0)) failures.push('local face swap produced no result');
     }

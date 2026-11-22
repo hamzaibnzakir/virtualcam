@@ -47,11 +47,40 @@ function padImage(rgba, width, height, pad) {
   return { rgba: out, width: w, height: h };
 }
 
-function providerList(preferred) {
-  if (preferred === 'cpu') return [['cpu']];
-  if (process.platform === 'win32') return [['dml'], ['cpu']];
-  if (process.platform === 'darwin') return [['coreml'], ['cpu']];
-  return [['cpu']];
+// Where the models can run, in the order they are tried. On Windows a laptop often has two graphics
+// chips (one built into the processor, one dedicated), and DirectML numbers them 0, 1 in an order
+// that depends on which drives the screen, so both are tried and the faster one wins.
+// gpuCount is how many graphics chips Windows reported (0 when unknown); with just one, chip 2 would be
+// Windows' slow software stand-in, so it isn't tried.
+function deviceCandidates(preferred, gpuCount = 0) {
+  if (preferred === 'cpu') return [{ name: 'cpu' }];
+  if (process.platform === 'win32') {
+    const gpus = gpuCount === 1 ? [0] : [0, 1];
+    return [...gpus.map((deviceId) => ({ name: 'dml', deviceId })), { name: 'cpu' }];
+  }
+  if (process.platform === 'darwin') return [{ name: 'coreml' }, { name: 'cpu' }];
+  return [{ name: 'cpu' }];
+}
+
+function sessionOptionsFor(device) {
+  const options = {
+    executionProviders: [device.name === 'dml' ? { name: 'dml', deviceId: device.deviceId } : device.name],
+    graphOptimizationLevel: 'all',
+    logSeverityLevel: 3,
+  };
+  if (device.name === 'dml') {
+    // DirectML requires these two settings.
+    options.enableMemPattern = false;
+    options.executionMode = 'sequential';
+  }
+  return options;
+}
+
+function deviceLabel(device) {
+  if (!device) return 'none';
+  if (device.name === 'dml') return `graphics chip ${device.deviceId + 1}`;
+  if (device.name === 'coreml') return 'your Mac';
+  return 'the processor';
 }
 
 class FaceSwapper {
@@ -79,46 +108,80 @@ class FaceSwapper {
     return fs.existsSync(path.join(this.modelsDir, ENHANCER_FILE));
   }
 
-  async load({ preferred = 'auto', detSize = 640 } = {}) {
+  // Times one swap on a device: the first run sets the device up (it can take seconds on a graphics
+  // chip), the second is the real speed.
+  async timeSwap(session) {
+    const feeds = {
+      target: new this.ort.Tensor('float32', new Float32Array(3 * SWAP_SIZE * SWAP_SIZE).fill(0.5), [1, 3, SWAP_SIZE, SWAP_SIZE]),
+      source: new this.ort.Tensor('float32', new Float32Array(512).fill(0.04), [1, 512]),
+    };
+    let t = Date.now();
+    await session.run(feeds);
+    const first = Date.now() - t;
+    if (first > 15000) return first; // hopeless for live video; no need for a second run
+    t = Date.now();
+    await session.run(feeds);
+    return Date.now() - t;
+  }
+
+  async load({ preferred = 'auto', gpuCount = 0, detSize = 640, onStep = () => {}, log = () => {} } = {}) {
     const file = (key) => path.join(this.modelsDir, MODEL_FILES[key]);
     for (const key of Object.keys(MODEL_FILES)) {
       if (!fs.existsSync(file(key))) throw new Error(`Missing model file ${MODEL_FILES[key]}`);
     }
 
-    let lastError = null;
-    this.fallbackReason = '';
-    for (const providers of providerList(preferred)) {
+    // Try each device with the swap model (the heavy one) and keep the fastest.
+    const candidates = deviceCandidates(preferred, gpuCount);
+    this.tried = [];
+    let best = null;
+    for (const device of candidates) {
+      const label = deviceLabel(device);
+      // A graphics chip that swaps this fast beats any processor, so skip timing the processor.
+      if (device.name === 'cpu' && best && best.ms < 60) break;
+      onStep(`testing ${label}`);
+      const started = Date.now();
+      let session = null;
       try {
-        const options = {
-          executionProviders: providers,
-          graphOptimizationLevel: 'all',
-          logSeverityLevel: 3,
-        };
-        if (providers[0] === 'dml') {
-          // DirectML requires these two settings.
-          options.enableMemPattern = false;
-          options.executionMode = 'sequential';
+        session = await this.ort.InferenceSession.create(file('swapper'), sessionOptionsFor(device));
+        const loadMs = Date.now() - started;
+        const ms = await this.timeSwap(session);
+        this.tried.push({ device: label, loadMs, swapMs: ms });
+        log(`${label}: loaded in ${loadMs} ms, one swap ${ms} ms`);
+        if (!best || ms < best.ms) {
+          if (best) await best.session.release().catch(() => {});
+          best = { device, session, ms };
+        } else {
+          await session.release().catch(() => {});
         }
-        const [det, rec, swap] = await Promise.all([
-          this.ort.InferenceSession.create(file('detector'), options),
-          this.ort.InferenceSession.create(file('recognizer'), options),
-          this.ort.InferenceSession.create(file('swapper'), options),
-        ]);
-        this.detector = new FaceDetector(this.ort, det, { size: detSize });
-        this.recognizer = rec;
-        this.swapper = swap;
-        this.provider = providers[0];
-        this.sessionOptions = options;
-        break;
       } catch (err) {
-        lastError = err;
-        this.fallbackReason = `${providers[0]}: ${(err && err.message) || err}`.slice(0, 300);
+        const message = `${(err && err.message) || err}`.replace(/\s+/g, ' ').slice(0, 200);
+        this.tried.push({ device: label, error: message });
+        log(`${label}: not usable (${message})`);
+        if (session) await session.release().catch(() => {});
       }
     }
-    if (!this.provider) throw lastError || new Error('Could not load the face models');
+    if (!best) throw new Error(`The face models could not run here (${this.tried.map((t) => `${t.device}: ${t.error}`).join('; ')})`);
 
+    const options = sessionOptionsFor(best.device);
+    this.provider = best.device.name;
+    this.deviceId = best.device.deviceId;
+    this.deviceLabel = deviceLabel(best.device);
+    this.swapMs = best.ms;
+    this.sessionOptions = options;
+    this.swapper = best.session;
+    const failed = this.tried.filter((t) => t.error);
+    this.fallbackReason = best.device.name === 'cpu' && failed.length ? failed.map((t) => `${t.device}: ${t.error}`).join('; ').slice(0, 300) : '';
+
+    onStep(`loading the face finder on ${this.deviceLabel}`);
+    const det = await this.ort.InferenceSession.create(file('detector'), options);
+    this.detector = new FaceDetector(this.ort, det, { size: detSize });
+    onStep(`loading the identity model on ${this.deviceLabel}`);
+    this.recognizer = await this.ort.InferenceSession.create(file('recognizer'), options);
+    log(`using ${this.deviceLabel}`);
+
+    onStep('reading the swap model');
     this.emap = this.loadEmap(file('swapper'));
-    return { provider: this.provider, fallbackReason: this.fallbackReason };
+    return { provider: this.provider, deviceId: this.deviceId, deviceLabel: this.deviceLabel, swapMs: this.swapMs, tried: this.tried, fallbackReason: this.fallbackReason };
   }
 
   // Turns the sharpening pass on or off; loads its model the first time.

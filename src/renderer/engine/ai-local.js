@@ -5,12 +5,17 @@ import { output } from './state.js';
 const FRESH_MS = 1000; // older results than this are not shown (the real picture shows instead)
 
 export class LocalFaceAI {
-  constructor({ api, onState, onError }) {
+  constructor({ api, onState, onError, onProgress = () => {} }) {
     this.api = api;
     this.onState = onState;
     this.onError = onError;
+    this.onProgress = onProgress;
     this.state = 'off';
     this.provider = '';
+    this.deviceLabel = '';
+    this.tried = [];
+    this.step = ''; // what the engine is doing during a long start-up step
+    this.gpuCount = 0; // graphics chips found by the hardware check (0 = unknown)
     this.target = null;
     this.dirty = false;
     this.running = false;
@@ -97,9 +102,11 @@ export class LocalFaceAI {
         if (target.enhance && !models.boost) {
           this.onError('Download the face detail boost first (Settings in the AI panel).');
         } else {
+          this.step = target.enhance ? 'loading the face detail model' : '';
           this.send({ type: 'enhance', on: target.enhance });
-          const res = await this.waitFor('enhance');
+          const res = await this.waitFor('enhance', { idle: 90000, cap: 600000 });
           this.applied.enhance = Boolean(res.on);
+          this.step = '';
         }
       }
 
@@ -111,9 +118,11 @@ export class LocalFaceAI {
         } else {
           this.setState('loading');
           const ref = await blobToPixels(target.refBlob, 1024);
+          this.step = 'reading the face in your photo';
           this.send({ type: 'reference', width: ref.width, height: ref.height, pixels: ref.data });
           const res = await this.waitFor('reference');
           this.applied.refKey = res.found ? target.refKey : `missing:${target.refKey}`;
+          this.step = '';
         }
       }
 
@@ -128,13 +137,18 @@ export class LocalFaceAI {
 
   async startEngine() {
     this.setState('starting');
+    this.step = 'starting the face engine';
     const res = await this.api.engineStart();
     if (!res || !res.ok) throw new Error('The face engine could not start');
-    await this.waitFor('hello', 15000);
-    this.send({ type: 'load', modelsDir: res.modelsDir });
-    const loaded = await this.waitFor('loaded', 120000);
+    await this.waitFor('hello', { idle: 30000 });
+    this.send({ type: 'load', modelsDir: res.modelsDir, gpuCount: this.gpuCount });
+    // The first start can be slow: the AI runtime loads, then each graphics chip is tried.
+    const loaded = await this.waitFor('loaded', { idle: 90000, cap: 600000 });
     this.provider = loaded.provider;
+    this.deviceLabel = loaded.deviceLabel || '';
+    this.tried = loaded.tried || [];
     this.fallbackReason = loaded.fallbackReason || '';
+    this.step = '';
     this.engineReady = true;
     this.applied = { refKey: null, enhance: false };
   }
@@ -143,13 +157,25 @@ export class LocalFaceAI {
     if (!this.api.enginePost(message)) throw new Error('The face engine is not connected');
   }
 
-  waitFor(type, timeout = 60000) {
+  // Waits for a reply. 'idle' is how long to wait without any sign of work: the engine reports
+  // progress every few seconds during long steps, and each report restarts the clock. 'cap' is the
+  // longest wait in total.
+  waitFor(type, { idle = 60000, cap = 300000 } = {}) {
     return new Promise((resolve, reject) => {
+      const started = performance.now();
       const waiter = { type, resolve, reject };
-      waiter.timer = setTimeout(() => {
+      const fail = () => {
         this.waiters = this.waiters.filter((w) => w !== waiter);
-        reject(new Error('The face engine did not answer in time'));
-      }, timeout);
+        clearTimeout(waiter.timer);
+        const during = this.step ? ` while ${this.step}` : '';
+        reject(new Error(`The face engine did not answer in time${during}. Its log (face-engine.log) has the details.`));
+      };
+      waiter.arm = () => {
+        clearTimeout(waiter.timer);
+        const left = cap - (performance.now() - started);
+        waiter.timer = setTimeout(fail, Math.max(0, Math.min(idle, left)));
+      };
+      waiter.arm();
       this.waiters.push(waiter);
     });
   }
@@ -169,6 +195,15 @@ export class LocalFaceAI {
       this.handleResult(msg);
       return;
     }
+    if (msg.type === 'progress') {
+      const replyType = msg.request === 'load' ? 'loaded' : msg.request;
+      this.waiters.filter((w) => w.type === replyType).forEach((w) => w.arm());
+      if (msg.step && msg.step !== this.step) {
+        this.step = msg.step;
+        this.onProgress(this.step);
+      }
+      return;
+    }
     if (msg.type === 'error') {
       if (msg.request === 'frame') {
         this.inFlight = null;
@@ -178,7 +213,7 @@ export class LocalFaceAI {
       if (waiter) {
         this.waiters = this.waiters.filter((w) => w !== waiter);
         clearTimeout(waiter.timer);
-        waiter.reject(new Error(msg.message));
+        waiter.reject(new Error(msg.step && !String(msg.message).includes(msg.step) ? `${msg.message} (while ${msg.step})` : msg.message));
       } else {
         this.onError(`Local AI: ${msg.message}`);
       }

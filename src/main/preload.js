@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('vcam', {
     return () => engineListeners.delete(handler);
   },
   onEngineExit: (handler) => listen('faceengine:exit', handler),
+  showEngineLog: () => ipcRenderer.invoke('faceengine:log'),
 
   hardwareCheck: () => ipcRenderer.invoke('hardware:check'),
   modelsStatus: () => ipcRenderer.invoke('models:status'),

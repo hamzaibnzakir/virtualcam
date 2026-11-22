@@ -2,13 +2,52 @@
 
 // Face engine process. Runs the local face swap away from the app window so the UI never stutters.
 // The studio talks to it directly over a MessagePort:
-//   -> { type: 'load', modelsDir, preferred }        <- { type: 'loaded', provider } | { type: 'error', ... }
+//   -> { type: 'load', modelsDir, preferred }        <- { type: 'loaded', provider, deviceLabel, ... } | { type: 'error', ... }
+//   While a request is running:                      <- { type: 'progress', request, step, seconds } every few seconds
 //   -> { type: 'reference', width, height, pixels }  <- { type: 'reference', found }
 //   -> { type: 'clear-reference' }
 //   -> { type: 'enhance', on }                       <- { type: 'enhance', on }
 //   -> { type: 'frame', id, width, height, pixels }  <- { type: 'result', id, faces, ms }
-const ort = require('onnxruntime-node');
-const { FaceSwapper } = require('./swapper');
+const fs = require('node:fs');
+
+// Everything written here goes to face-engine.log in the app's logs folder (written straight away,
+// so nothing is lost if the process dies).
+const LOG_FILE = process.env.VCAM_ENGINE_LOG || '';
+function log(...parts) {
+  const line = `[${new Date().toISOString()}] ${parts.join(' ')}\n`;
+  if (LOG_FILE) {
+    try {
+      fs.appendFileSync(LOG_FILE, line);
+      return;
+    } catch {
+      // fall through to stdout
+    }
+  }
+  process.stdout.write(line);
+}
+
+process.on('uncaughtException', (err) => {
+  log(`crashed: ${(err && err.stack) || err}`);
+  process.exit(1);
+});
+
+// The AI runtime is loaded on the first 'load' request, not at start-up, so the studio hears from
+// this process straight away and a slow or failing runtime load is reported like any other step.
+let ort = null;
+let FaceSwapper = null;
+function loadRuntime() {
+  if (ort) return;
+  const t = Date.now();
+  try {
+    ort = require('onnxruntime-node');
+    ({ FaceSwapper } = require('./swapper'));
+  } catch (err) {
+    ort = null;
+    throw new Error(`The AI runtime could not load: ${(err && err.message) || err}`);
+  }
+  log(`AI runtime loaded in ${Date.now() - t} ms (onnxruntime ${ort.env && ort.env.versions ? ort.env.versions.common : ''})`);
+}
+log(`face engine started (pid ${process.pid})`);
 
 let swapper = null;
 let port = null;
@@ -25,18 +64,37 @@ function toBytes(pixels) {
   throw new Error('Frame pixels are missing');
 }
 
+const LONG_REQUESTS = new Set(['load', 'reference', 'enhance']);
+
 async function handle(msg) {
+  // Long requests report what they are doing every few seconds, so the studio waits as long as work
+  // is still going on and can say which step is slow.
+  let step = msg.type === 'load' ? 'starting' : msg.type;
+  const started = Date.now();
+  const heartbeat = LONG_REQUESTS.has(msg.type)
+    ? setInterval(() => reply({ type: 'progress', request: msg.type, step, seconds: Math.round((Date.now() - started) / 1000) }), 3000)
+    : null;
+  const onStep = (next) => {
+    step = next;
+    log(`${msg.type}: ${next}`);
+    reply({ type: 'progress', request: msg.type, step, seconds: Math.round((Date.now() - started) / 1000) });
+  };
   try {
     switch (msg.type) {
       case 'load': {
+        onStep('loading the AI runtime');
+        loadRuntime();
         swapper = new FaceSwapper(ort, msg.modelsDir);
-        const { provider, fallbackReason } = await swapper.load({ preferred: msg.preferred || 'auto' });
-        reply({ type: 'loaded', provider, fallbackReason });
+        const info = await swapper.load({ preferred: msg.preferred || 'auto', gpuCount: msg.gpuCount || 0, onStep, log });
+        log(`load: done in ${Date.now() - started} ms on ${info.deviceLabel} (${info.swapMs} ms per swap)`);
+        reply({ type: 'loaded', ...info });
         break;
       }
       case 'reference': {
         if (!swapper) throw new Error('Face engine is not loaded');
+        onStep('reading the face in the photo');
         const found = await swapper.setReference(toBytes(msg.pixels), msg.width, msg.height);
+        log(`reference: face ${found ? 'found' : 'not found'} in ${Date.now() - started} ms`);
         reply({ type: 'reference', found });
         break;
       }
@@ -45,7 +103,9 @@ async function handle(msg) {
         break;
       case 'enhance': {
         if (!swapper) throw new Error('Face engine is not loaded');
+        if (msg.on) onStep('loading the face detail model');
         const on = await swapper.setEnhance(Boolean(msg.on));
+        log(`enhance: ${on ? 'on' : 'off'} after ${Date.now() - started} ms`);
         reply({ type: 'enhance', on });
         break;
       }
@@ -74,7 +134,11 @@ async function handle(msg) {
         break;
     }
   } catch (err) {
-    reply({ type: 'error', request: msg.type, id: msg.id, message: (err && err.message) || String(err) });
+    const message = (err && err.message) || String(err);
+    if (msg.type !== 'frame') log(`${msg.type}: failed while ${step}: ${message}`);
+    reply({ type: 'error', request: msg.type, id: msg.id, step, message });
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
   }
 }
 
@@ -84,6 +148,7 @@ process.parentPort.on('message', (event) => {
     port = event.ports[0];
     port.on('message', (e) => handle(e.data));
     port.start();
+    log('connected to the studio');
     reply({ type: 'hello' });
   }
 });
