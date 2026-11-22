@@ -30,11 +30,14 @@ for (const file of ['studio.html', 'switcher.html', 'styles.css']) {
   cpSync(join(root, 'src/renderer', file), join(out, file));
 }
 
-// Lite engine: MediaPipe's WebAssembly runtime and the face tracking model ship with the app.
+// Lite engine: MediaPipe's WebAssembly runtime, the face tracking model and the hair/skin segmentation
+// model ship with the app.
 mkdirSync(join(out, 'mediapipe'), { recursive: true });
 for (const file of ['vision_wasm_internal.js', 'vision_wasm_internal.wasm']) {
   cpSync(join(root, 'node_modules/@mediapipe/tasks-vision/wasm', file), join(out, 'mediapipe', file));
 }
-cpSync(join(root, 'assets/mediapipe/face_landmarker.task'), join(out, 'mediapipe/face_landmarker.task'));
+for (const file of ['face_landmarker.task', 'selfie_multiclass_256x256.tflite']) {
+  cpSync(join(root, 'assets/mediapipe', file), join(out, 'mediapipe', file));
+}
 
 console.log('Built renderer into dist/');

@@ -330,8 +330,8 @@ function registerIpc() {
   });
   ipcMain.on('switcher:close', () => hideSwitcher());
 
-  // Bundled files the studio needs as raw bytes (the Lite engine's runtime and model).
-  const ASSETS = new Set(['mediapipe/vision_wasm_internal.wasm', 'mediapipe/face_landmarker.task']);
+  // Bundled files the studio needs as raw bytes (the Lite engine's runtime and models).
+  const ASSETS = new Set(['mediapipe/vision_wasm_internal.wasm', 'mediapipe/face_landmarker.task', 'mediapipe/selfie_multiclass_256x256.tflite']);
   ipcMain.handle('asset:read', async (_e, name) => {
     if (!ASSETS.has(name)) throw new Error('Unknown asset');
     const data = await fs.promises.readFile(path.join(DIST, name));

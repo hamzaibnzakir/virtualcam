@@ -10,7 +10,7 @@
 //      shading from your camera (frequency separation), add back your skin highlights, and feather
 //      the edges. Triangles that turn away from the camera fade out instead of smearing. If you
 //      wear glasses, their rims stay on top of the photo's face.
-import { FaceLandmarker } from '@mediapipe/tasks-vision';
+import { FaceLandmarker, ImageSegmenter } from '@mediapipe/tasks-vision';
 import Delaunator from 'delaunator';
 import { output } from './state.js';
 
@@ -43,6 +43,14 @@ const FRESH_MS = 1000;
 //   shapeRing: the warp fades out this far outside the face outline (share of the face radius)
 //   shapeRest: seconds of averaging for your resting face shape (expressions are changes from it);
 //              0 = no averaging (every frame is taken as rest, which also flattens expressions)
+//   mask:     1 = leave out what in the photo's face outline isn't skin (hair, glasses, background), so
+//             your own (reshaped) camera picture shows there; 0 = draw the whole outline
+//   maskLo, maskHi: the photo's skin confidence (0..1) where its face starts to show and fully shows
+//   maskStats: 1 = the photo's colour statistics come from its skin only (not its hair or glasses)
+//   maskGlasses: the photo's glasses frames are always painted out of the photo (filled from the skin
+//                around them); this much of the glasses' whole area (frames and lenses) is also cut, so
+//                your camera's own eye area shows there (1 = all of it)
+//   maskGlassesSoft: how soft that cut's edge is, as a share of the face size
 export const liteTuning = {
   shading: 0.15,
   detail: 0.03,
@@ -72,6 +80,12 @@ export const liteTuning = {
   shapeRing: 0.35,
   shapeRest: 5,
   depthSmooth: 0.5,
+  mask: 1,
+  maskLo: 0.3,
+  maskHi: 0.8,
+  maskStats: 1,
+  maskGlasses: 0,
+  maskGlassesSoft: 0.04,
 };
 const TUNE = liteTuning;
 const MESH_POINTS = 468; // 0..467 are the face; 468..477 are the irises
@@ -152,8 +166,8 @@ function rgbToLab(r, g, b) {
   return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
 }
 
-// Mean and spread of LAB colour inside a polygon of an RGBA image.
-function labStats(data, width, height, poly) {
+// Mean and spread of LAB colour inside a polygon of an RGBA image (optionally weighted per pixel, 0..1).
+function labStats(data, width, height, poly, weight = null) {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -170,13 +184,15 @@ function labStats(data, width, height, poly) {
   for (let y = Math.max(0, Math.floor(minY)); y < Math.min(height, Math.ceil(maxY)); y += 1) {
     for (let x = Math.max(0, Math.floor(minX)); x < Math.min(width, Math.ceil(maxX)); x += 1) {
       if (!inPolygon(x + 0.5, y + 0.5, poly)) continue;
+      const w = weight ? weight(x + 0.5, y + 0.5) : 1;
+      if (w <= 0) continue;
       const i = (y * width + x) * 4;
       const lab = rgbToLab(data[i] / 255, data[i + 1] / 255, data[i + 2] / 255);
       for (let c = 0; c < 3; c += 1) {
-        sum[c] += lab[c];
-        sq[c] += lab[c] * lab[c];
+        sum[c] += lab[c] * w;
+        sq[c] += lab[c] * lab[c] * w;
       }
-      n += 1;
+      n += w;
     }
   }
   if (n < 30) return null;
@@ -304,6 +320,207 @@ function detectGlasses(canvas, width, height, eyes) {
   const patch = glassesCtx.getImageData(0, 0, pw, ph).data;
   const small = { ...eyes, ed: eyes.ed * k, mid: [(eyes.mid[0] - x0) * k, (eyes.mid[1] - y0) * k] };
   return glassesScore(patch, pw, ph, 0, 0, small);
+}
+
+// ---------- the photo's skin: its hair, glasses and background left out ----------
+// MediaPipe's multiclass selfie segmenter gives each pixel a confidence for background, hair, body skin,
+// face skin, clothes and "other" (glasses, jewellery). Brows, eyes, lips, beards and moustaches come out
+// as face skin; glasses frames as "other" (the lenses, with the eyes behind them, as face skin).
+const SEG_SIZE = 256; // the model's own input size
+const SEG_CROP = 2; // the photo is segmented in a square this many face sizes wide, centred on the face
+const SKIN_MIN_COVERAGE = 0.3; // below this share of skin inside the face outline, the mask isn't used
+const GLASSES_FILL_LO = 0.1; // glasses confidence where the photo starts being painted out, and where fully
+const GLASSES_FILL_HI = 0.35;
+const GLASSES_CLOSE = 0.12; // gaps up to about this share of the face size (the lenses) are closed over
+
+// Box blur of radius r (separable) on a w×h Float32Array.
+function boxBlur(src, w, h, r) {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let s = 0;
+      let n = 0;
+      for (let k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k += 1) {
+        s += src[y * w + k];
+        n += 1;
+      }
+      tmp[y * w + x] = s / n;
+    }
+  }
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let s = 0;
+      let n = 0;
+      for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k += 1) {
+        s += tmp[k * w + x];
+        n += 1;
+      }
+      out[y * w + x] = s / n;
+    }
+  }
+  return out;
+}
+
+// Skin confidence (0..255, face + body skin) over a square around the photo's face, and where that
+// square is in the photo (px). Null if the segmenter fails.
+function segmentSkin(segmenter, canvas, oval) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of oval) {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  const side = Math.max(maxX - minX, maxY - minY) * SEG_CROP;
+  const x0 = (minX + maxX) / 2 - side / 2;
+  const y0 = (minY + maxY) / 2 - side / 2;
+  const crop = document.createElement('canvas');
+  crop.width = SEG_SIZE;
+  crop.height = SEG_SIZE;
+  const ctx = crop.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, SEG_SIZE, SEG_SIZE);
+  ctx.drawImage(canvas, x0, y0, side, side, 0, 0, SEG_SIZE, SEG_SIZE);
+  let res = null;
+  try {
+    res = segmenter.segment(crop);
+    const masks = res.confidenceMasks;
+    if (!masks || masks.length < 4) return null;
+    const size = masks[0].width;
+    const body = masks[2].getAsFloat32Array();
+    const face = masks[3].getAsFloat32Array();
+    const other = masks.length > 5 ? masks[5].getAsFloat32Array() : new Float32Array(size * size);
+    // Glasses frames (dilated by one cell so their dark edges go too) count as skin: they are painted
+    // out of the photo (see paintOut). The glasses' whole area (frames and lenses: the frames closed
+    // over, softened) is cut by TUNE.maskGlasses, so your camera's own eye area shows there instead.
+    const glasses = rankFilter(other, size, size, 1, true);
+    let area = null;
+    if (TUNE.maskGlasses > 0) {
+      const r = Math.max(1, Math.round((size / SEG_CROP) * GLASSES_CLOSE));
+      area = boxBlur(closing(glasses, size, size, r), size, size, Math.max(1, Math.round((size / SEG_CROP) * TUNE.maskGlassesSoft)));
+    }
+    const data = new Uint8Array(size * size);
+    for (let i = 0; i < data.length; i += 1) {
+      const s = Math.min(1, body[i] + face[i] + glasses[i]) * (area ? 1 - Math.min(1, area[i] * 1.5) * TUNE.maskGlasses : 1);
+      data[i] = Math.round(s * 255);
+    }
+    return { data, glasses, size, x0, y0, side };
+  } catch (err) {
+    console.warn(`Lite: photo segmentation failed: ${(err && err.message) || err}`);
+    return null;
+  } finally {
+    if (res) res.close();
+  }
+}
+
+// The photo's glasses painted out: each glasses pixel is filled from the skin around it (push-pull:
+// averages over ever larger blocks, the nearest known colour wins), so its face can be drawn without them.
+function paintOut(ctx, width, height, skin) {
+  const { size, x0, y0, side, glasses } = skin;
+  const bx = Math.max(0, Math.floor(x0));
+  const by = Math.max(0, Math.floor(y0));
+  const w = Math.min(width, Math.ceil(x0 + side)) - bx;
+  const h = Math.min(height, Math.ceil(y0 + side)) - by;
+  if (w < 2 || h < 2) return;
+  // Level 0: colour premultiplied by how much it is kept (1 = skin, 0 = glasses), soft at the edges.
+  const keep0 = new Float32Array(w * h);
+  const col0 = new Float32Array(w * h * 3);
+  const img = ctx.getImageData(bx, by, w, h);
+  const d = img.data;
+  const k = size / side;
+  let any = false;
+  for (let y = 0; y < h; y += 1) {
+    const v = Math.min(size - 1, Math.max(0, (by + y + 0.5 - y0) * k - 0.5));
+    const v0 = Math.floor(v);
+    const v1 = Math.min(size - 1, v0 + 1);
+    const fv = v - v0;
+    for (let x = 0; x < w; x += 1) {
+      const u = Math.min(size - 1, Math.max(0, (bx + x + 0.5 - x0) * k - 0.5));
+      const u0 = Math.floor(u);
+      const u1 = Math.min(size - 1, u0 + 1);
+      const fu = u - u0;
+      const g = (glasses[v0 * size + u0] * (1 - fu) + glasses[v0 * size + u1] * fu) * (1 - fv) +
+        (glasses[v1 * size + u0] * (1 - fu) + glasses[v1 * size + u1] * fu) * fv;
+      const keep = 1 - smoothstep(GLASSES_FILL_LO, GLASSES_FILL_HI, g);
+      const i = y * w + x;
+      keep0[i] = keep;
+      for (let c = 0; c < 3; c += 1) col0[i * 3 + c] = d[i * 4 + c] * keep;
+      if (keep < 1) any = true;
+    }
+  }
+  if (!any) return;
+  // Pull: halve until one block, each block's weight capped at 1.
+  const levels = [{ w, h, keep: keep0, col: col0 }];
+  while (levels[levels.length - 1].w > 1 || levels[levels.length - 1].h > 1) {
+    const f = levels[levels.length - 1];
+    const nw = Math.ceil(f.w / 2);
+    const nh = Math.ceil(f.h / 2);
+    const keep = new Float32Array(nw * nh);
+    const col = new Float32Array(nw * nh * 3);
+    for (let y = 0; y < f.h; y += 1) {
+      for (let x = 0; x < f.w; x += 1) {
+        const i = y * f.w + x;
+        const j = (y >> 1) * nw + (x >> 1);
+        keep[j] += f.keep[i];
+        for (let c = 0; c < 3; c += 1) col[j * 3 + c] += f.col[i * 3 + c];
+      }
+    }
+    for (let j = 0; j < nw * nh; j += 1) {
+      const s = keep[j] > 1 ? 1 / keep[j] : 1;
+      keep[j] *= s;
+      for (let c = 0; c < 3; c += 1) col[j * 3 + c] *= s;
+    }
+    levels.push({ w: nw, h: nh, keep, col });
+  }
+  // Push: what a pixel lacks comes from the (already filled) coarser level, interpolated (no blocks).
+  for (let l = levels.length - 2; l >= 0; l -= 1) {
+    const f = levels[l];
+    const p = levels[l + 1];
+    for (let j = 0; j < p.w * p.h; j += 1) {
+      const pk = p.keep[j] || 1;
+      for (let c = 0; c < 3; c += 1) p.col[j * 3 + c] /= pk;
+      p.keep[j] = 1;
+    }
+    for (let y = 0; y < f.h; y += 1) {
+      const py = Math.min(p.h - 1, Math.max(0, (y + 0.5) / 2 - 0.5));
+      const y0 = Math.floor(py);
+      const y1 = Math.min(p.h - 1, y0 + 1);
+      const fy = py - y0;
+      for (let x = 0; x < f.w; x += 1) {
+        const i = y * f.w + x;
+        const miss = 1 - f.keep[i];
+        f.keep[i] = 1;
+        if (miss <= 0) continue;
+        const px = Math.min(p.w - 1, Math.max(0, (x + 0.5) / 2 - 0.5));
+        const x0 = Math.floor(px);
+        const x1 = Math.min(p.w - 1, x0 + 1);
+        const fx = px - x0;
+        const a = (y0 * p.w + x0) * 3;
+        const b = (y0 * p.w + x1) * 3;
+        const cc = (y1 * p.w + x0) * 3;
+        const dd = (y1 * p.w + x1) * 3;
+        for (let c = 0; c < 3; c += 1) {
+          const v = (p.col[a + c] * (1 - fx) + p.col[b + c] * fx) * (1 - fy) + (p.col[cc + c] * (1 - fx) + p.col[dd + c] * fx) * fy;
+          f.col[i * 3 + c] += miss * v;
+        }
+      }
+    }
+  }
+  for (let i = 0; i < w * h; i += 1) for (let c = 0; c < 3; c += 1) d[i * 4 + c] = Math.round(col0[i * 3 + c]);
+  ctx.putImageData(img, bx, by);
+}
+
+// The photo's skin opacity (0..1) at photo pixel (x, y), as the shader computes it.
+function skinAt(skin, x, y) {
+  const s = skin.size;
+  const u = Math.floor(((x - skin.x0) / skin.side) * s);
+  const v = Math.floor(((y - skin.y0) / skin.side) * s);
+  if (u < 0 || v < 0 || u >= s || v >= s) return 1;
+  return smoothstep(TUNE.maskLo, Math.max(TUNE.maskLo + 1e-3, TUNE.maskHi), skin.data[v * s + u] / 255);
 }
 
 // ---------- smoothing: steady when still, no added delay when the head moves ----------
@@ -498,6 +715,9 @@ uniform vec3 uSrcMean, uSrcStd, uDstMean, uDstStd;
 uniform float uSrcLod, uFrameLod, uShading, uDetail, uStrength;
 uniform float uCamGlasses, uGlassEd, uGlassLod;
 uniform vec2 uGlassR, uGlassL, uGlassAx; // your eye centres and eye line, in output pixels
+uniform sampler2D uMask; // the photo's skin confidence, over a square around its face
+uniform vec4 uMaskBox;   // that square in photo UV: corner, size
+uniform vec3 uMaskSet;   // confidence where the photo starts to show, fully shows; strength
 in vec2 vSrcUV;
 in vec2 vFrameUV;
 in float vAlpha;
@@ -558,7 +778,9 @@ void main() {
   vec3 frameLow = textureLod(uFrame, fuv, uFrameLod).rgb;
   // Photo detail + the room's shading on your face + your live skin highlights.
   vec3 col = src + (frameLow - srcLow) * uShading + (frame - frameLow) * uDetail;
-  float alpha = vAlpha;
+  // Only the photo's skin: where it has hair or glasses, your own (reshaped) picture shows.
+  float skin = texture(uMask, (vSrcUV - uMaskBox.xy) / uMaskBox.zw).r;
+  float alpha = vAlpha * mix(1.0, smoothstep(uMaskSet.x, uMaskSet.y, skin), uMaskSet.z);
   if (uCamGlasses > 0.0) {
     // Your glasses rims (thin dark lines in the glasses area) stay on top.
     vec2 fpx = vFrameUV * uViewport; // where this spot is on your real face
@@ -732,6 +954,19 @@ export class LiteFaceAI {
       this.delegate = 'CPU';
     }
     this.imageLm = await make('IMAGE', 'CPU');
+    // Hair/skin segmentation of the photo (once per photo). Without it the whole face outline is drawn.
+    try {
+      const segModel = await this.api.readAsset('mediapipe/selfie_multiclass_256x256.tflite');
+      this.segmenter = await ImageSegmenter.createFromOptions(fileset, {
+        baseOptions: { modelAssetBuffer: new Uint8Array(segModel), delegate: 'CPU' },
+        runningMode: 'IMAGE',
+        outputConfidenceMasks: true,
+        outputCategoryMask: false,
+      });
+    } catch (err) {
+      this.segmenter = null;
+      console.warn(`Lite: no hair/skin segmentation: ${(err && err.message) || err}`);
+    }
     this.initGl();
     this.ready = true;
   }
@@ -751,6 +986,8 @@ export class LiteFaceAI {
     this.warpIndex = gl.createBuffer();
     this.frameTex = makeTexture(gl);
     this.srcTex = makeTexture(gl);
+    this.maskTex = makeTexture(gl);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     this.loc = {
       qPos: gl.getAttribLocation(this.quadProgram, 'aPos'),
       qFrame: gl.getUniformLocation(this.quadProgram, 'uFrame'),
@@ -763,7 +1000,7 @@ export class LiteFaceAI {
       wFrame: gl.getUniformLocation(this.warpProgram, 'uFrame'),
       wViewport: gl.getUniformLocation(this.warpProgram, 'uViewport'),
     };
-    for (const name of ['uSrc', 'uFrame', 'uViewport', 'uSrcMean', 'uSrcStd', 'uDstMean', 'uDstStd', 'uSrcLod', 'uFrameLod', 'uShading', 'uDetail', 'uStrength', 'uCamGlasses', 'uGlassEd', 'uGlassLod', 'uGlassR', 'uGlassL', 'uGlassAx']) {
+    for (const name of ['uSrc', 'uFrame', 'uViewport', 'uSrcMean', 'uSrcStd', 'uDstMean', 'uDstStd', 'uSrcLod', 'uFrameLod', 'uShading', 'uDetail', 'uStrength', 'uCamGlasses', 'uGlassEd', 'uGlassLod', 'uGlassR', 'uGlassL', 'uGlassAx', 'uMask', 'uMaskBox', 'uMaskSet']) {
       this.loc[name] = gl.getUniformLocation(this.faceProgram, name);
     }
   }
@@ -903,21 +1140,47 @@ export class LiteFaceAI {
     for (let i = 0; i < MESH_POINTS; i += 1) warpNbrAt[i + 1] = warpNbrAt[i] + nbrSets[i].size;
     const warpNbr = Int32Array.from(nbrSets.flatMap((s) => [...s]));
 
-    const stats = labStats(ctx.getImageData(0, 0, width, height).data, width, height, oval) || {
-      mean: [60, 10, 15],
-      std: [15, 5, 7],
-    };
+    // The photo's skin (hair, glasses and background inside the outline are left out). If hardly any of
+    // the face counts as skin, the segmentation has failed (a drawing, an odd crop): draw it all.
+    let skin = this.segmenter && TUNE.mask > 0 ? segmentSkin(this.segmenter, canvas, oval) : null;
+    if (skin) paintOut(ctx, width, height, skin);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    if (skin) {
+      let sum = 0;
+      let n = 0;
+      for (let y = 0; y < height; y += 4) {
+        for (let x = 0; x < width; x += 4) {
+          if (!inPolygon(x + 0.5, y + 0.5, oval)) continue;
+          sum += skinAt(skin, x + 0.5, y + 0.5);
+          n += 1;
+        }
+      }
+      skin.coverage = n ? sum / n : 0;
+      if (skin.coverage < SKIN_MIN_COVERAGE) skin = null;
+    }
+    const weight = skin && TUNE.maskStats ? (x, y) => skinAt(skin, x, y) : null;
+    const stats = (weight && labStats(pixels, width, height, oval, weight)) ||
+      labStats(pixels, width, height, oval) || {
+        mean: [60, 10, 15],
+        std: [15, 5, 7],
+      };
 
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
     gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    if (skin) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, skin.size, skin.size, 0, gl.RED, gl.UNSIGNED_BYTE, skin.data);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([255]));
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    const maskBox = skin ? [skin.x0 / width, skin.y0 / height, skin.side / width, skin.side / height] : [0, 0, 1, 1];
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.warpIndex);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, warpTris, gl.STATIC_DRAW);
 
     this.smoother.reset();
     this.dstStats = null;
-    return { width, height, points, points3, lips, nearMouth, jaw, warpTris, warpNbr, warpNbrAt, warpCount: warpTris.length, tris: Uint16Array.from(tris), feather, srcAreas, stats, faceWidth };
+    return { width, height, points, points3, lips, nearMouth, jaw, warpTris, warpNbr, warpNbrAt, warpCount: warpTris.length, tris: Uint16Array.from(tris), feather, srcAreas, stats, faceWidth, masked: Boolean(skin), maskBox, skinCoverage: skin ? skin.coverage : null };
   }
 
   // Called by the compositor every frame. frameTime (ms) is when the frame was captured; it defaults
@@ -1090,6 +1353,12 @@ export class LiteFaceAI {
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
     gl.uniform1i(this.loc.uSrc, 0);
     gl.uniform1i(this.loc.uFrame, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(this.loc.uMask, 2);
+    gl.uniform4fv(this.loc.uMaskBox, src.maskBox);
+    gl.uniform3f(this.loc.uMaskSet, TUNE.maskLo, Math.max(TUNE.maskLo + 1e-3, TUNE.maskHi), src.masked ? Math.min(1, TUNE.mask) : 0);
     gl.uniform2f(this.loc.uViewport, output.width, output.height);
     gl.uniform3fv(this.loc.uSrcMean, src.stats.mean);
     gl.uniform3fv(this.loc.uSrcStd, src.stats.std);
