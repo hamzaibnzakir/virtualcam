@@ -934,6 +934,7 @@ async function start() {
 async function runSmokeTest() {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const report = { steps: [] };
+  const failures = [];
   const probe = document.createElement('canvas');
   probe.width = 1;
   probe.height = 1;
@@ -989,9 +990,22 @@ async function runSmokeTest() {
       card.source.color = '#20c864';
       selectScene(card.id);
       await wait(1500);
+      // Device names stay hidden until camera permission is granted, so ask for any camera first.
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ video: true });
+        probe.getTracks().forEach((t) => t.stop());
+      } catch (err) {
+        report.steps.push({ step: 'camera-permission', error: String((err && err.name) || err) });
+      }
       const devices = await navigator.mediaDevices.enumerateDevices();
       const vc = devices.find((d) => d.kind === 'videoinput' && /virtualcam/i.test(d.label));
-      const step = { step: 'camera-loopback', installed: cameraState.installed, running: cameraState.running, listed: Boolean(vc) };
+      const step = {
+        step: 'camera-loopback',
+        installed: cameraState.installed,
+        running: cameraState.running,
+        listed: Boolean(vc),
+        cameras: devices.filter((d) => d.kind === 'videoinput').map((d) => d.label || '(no name)'),
+      };
       if (vc) {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: vc.deviceId }, width: 1280, height: 720 } });
         const video = document.createElement('video');
@@ -1014,7 +1028,7 @@ async function runSmokeTest() {
         step.ok = Math.abs(px[0] - 32) < 14 && Math.abs(px[1] - 200) < 14 && Math.abs(px[2] - 100) < 14;
       }
       report.steps.push(step);
-      if (!step.ok) throw new Error('the VirtualCam camera did not show the studio picture');
+      if (!step.ok) failures.push('the VirtualCam camera did not show the studio picture');
     }
 
     // Local face swap on a still photo of a face, when the test models are available.
@@ -1051,11 +1065,12 @@ async function runSmokeTest() {
         ms: local.stats.ms,
         hardware: hardware && hardware.verdict,
       });
-      if (!(local.lastResultAt > 0)) throw new Error('local face swap produced no result');
+      if (!(local.lastResultAt > 0)) failures.push('local face swap produced no result');
     }
 
 
-    report.ok = true;
+    report.ok = failures.length === 0;
+    if (failures.length) report.error = failures.join('; ');
   } catch (err) {
     report.ok = false;
     report.error = String((err && err.stack) || err);
