@@ -41,7 +41,7 @@ Drop a photo anywhere on the window (or click the photo box) and turn on **AI tr
 | Needs | Nothing extra: ships with the app, tracks on the CPU, draws with WebGL. Runs on almost any PC. | A one-time 470 MB download. A graphics card with 2 GB+ is recommended (any DirectX 12 GPU; your Dell's Quadro T2000 qualifies). | A Decart API key (Settings) and a good connection |
 | Extras | | **Face detail boost**: sharper, slower, 340 MB extra | Type a look or pick a quick style instead of a photo |
 
-The Lite engine follows the classic no-generative-AI recipe. It tracks 478 face points with MediaPipe (a small model built for this) and smooths them with a one-euro filter. It warps the photo onto your face with a fixed triangle mesh built once from the photo, cut out around your eyes and mouth. A WebGL shader then matches colour in LAB space, takes the room's shading and your skin highlights from the camera (frequency separation), feathers the edges, and fades triangles as your head turns away.
+The Lite engine follows the classic no-generative-AI recipe. It tracks 478 face points with MediaPipe (a small model built for this) and smooths them with a one-euro filter. It warps the photo onto your face with a fixed triangle mesh built once from the photo, cut out around your eyes and mouth. A WebGL shader then matches colour in LAB space, takes the room's shading and your skin highlights from the camera (frequency separation), feathers the edges, and fades the parts of the face that either face shows turned away. A segmentation model reads the photo once, so its hair and background stay off your face (its glasses stay, as part of how that person looks). `scripts/bench/` measures it against the Local AI engine on test pairs of AI-generated faces.
 
 The app checks your graphics card and says whether local AI will run well. If AI stops or drops, the real picture shows instead. It never goes black. Your **voice is never touched**: VirtualCam is video only, so your microphone goes straight to the call.
 
@@ -94,5 +94,5 @@ vendor/win/                   tested camera binaries, committed by CI
 
 - Camera device: [Softcam](https://github.com/tshino/softcam) by tshino, MIT.
 - Face models are downloaded on first use. The InsightFace models (face finder, identity, inswapper) are licensed for **non-commercial use only**. GFPGAN is Apache-2.0. Selling VirtualCam with the local engine would need commercially licensed models.
-- Lite engine: [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) (Apache-2.0, bundled in `assets/mediapipe`) and [Delaunator](https://github.com/mapbox/delaunator) (ISC).
+- Lite engine: [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) and [multiclass selfie segmentation](https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter) (Apache-2.0, bundled in `assets/mediapipe`) and [Delaunator](https://github.com/mapbox/delaunator) (ISC).
 - Cloud AI: [Decart](https://platform.decart.ai) realtime API.
