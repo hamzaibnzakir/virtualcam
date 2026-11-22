@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('vcam', {
           ref: process.env.VCAM_SMOKE_REF || '',
           installCamera: process.env.VCAM_SMOKE_INSTALL_CAMERA === '1',
           downloadModels: process.env.VCAM_SMOKE_DOWNLOAD === '1',
+          liteOut: process.env.VCAM_SMOKE_LITE_OUT || '',
         }
       : null,
 
@@ -39,6 +40,7 @@ contextBridge.exposeInMainWorld('vcam', {
 
   pickFile: (kind) => ipcRenderer.invoke('file:pick', kind),
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
+  readAsset: (name) => ipcRenderer.invoke('asset:read', name),
   // Full path of a file dropped onto the window ('' when it isn't a file on disk).
   pathForFile: (file) => {
     try {
@@ -89,4 +91,5 @@ contextBridge.exposeInMainWorld('vcam', {
   closeSwitcher: () => ipcRenderer.send('switcher:close'),
 
   smokeReport: (report) => ipcRenderer.send('smoke:report', report),
+  smokeSave: (filePath, bytes) => ipcRenderer.invoke('smoke:save', filePath, bytes),
 });

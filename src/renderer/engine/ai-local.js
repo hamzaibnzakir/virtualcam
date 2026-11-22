@@ -134,6 +134,7 @@ export class LocalFaceAI {
     this.send({ type: 'load', modelsDir: res.modelsDir });
     const loaded = await this.waitFor('loaded', 120000);
     this.provider = loaded.provider;
+    this.fallbackReason = loaded.fallbackReason || '';
     this.engineReady = true;
     this.applied = { refKey: null, enhance: false };
   }

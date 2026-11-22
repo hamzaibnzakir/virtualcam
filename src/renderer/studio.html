@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; connect-src 'self' https: wss: blob:; worker-src 'self' blob:; font-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; connect-src 'self' https: wss: blob:; worker-src 'self' blob:; font-src 'self'">
 <title>VirtualCam</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -142,6 +142,7 @@
         <label for="ai-engine">Engine</label>
         <select id="ai-engine">
           <option value="local">Local · face swap · free</option>
+          <option value="lite">Lite · face warp · any PC · free</option>
           <option value="cloud">Cloud · face and clothes · Decart</option>
         </select>
 
@@ -173,6 +174,11 @@
             <button type="button" class="btn btn-small" id="btn-boost-download">Download</button>
           </div>
           <div class="muted small" id="local-stats"></div>
+        </div>
+
+        <div class="engine-group" id="lite-group" hidden>
+          <div class="muted small">Warps the photo's face onto yours and matches your lighting. No download and no graphics card needed. You'll look like a blend of you and the photo; for a full face switch use Local. Works best with a front-facing, evenly lit photo.</div>
+          <div class="muted small" id="lite-stats"></div>
         </div>
 
         <div class="ai-status" id="ai-status">AI is off for this scene</div>

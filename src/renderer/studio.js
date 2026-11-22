@@ -1,5 +1,6 @@
 // Studio window: scenes, live preview, AI controls and the output window.
 import { DecartAI } from './engine/ai-decart.js';
+import { LiteFaceAI } from './engine/ai-lite.js';
 import { LocalFaceAI } from './engine/ai-local.js';
 import { Compositor } from './engine/compositor.js';
 import { SourceManager } from './engine/sources.js';
@@ -76,9 +77,21 @@ const local = new LocalFaceAI({
   onError: (message) => showToast(message, true),
 });
 
-// The local engine grabs frames as they are drawn; the camera driver takes each finished frame.
+const lite = new LiteFaceAI({
+  api,
+  onState: (next) => {
+    if (activeEngine === 'lite') {
+      aiState = next;
+      renderAi();
+    }
+  },
+  onError: (message) => showToast(message, true),
+});
+
+// The local engines grab frames as they are drawn; the camera driver takes each finished frame.
 compositor.beforeRender = (drawSource) => {
   if (activeEngine === 'local') local.tick(drawSource);
+  else if (activeEngine === 'lite') lite.tick(drawSource);
 };
 compositor.afterRender = (canvas) => sendCameraFrame(canvas);
 
@@ -139,16 +152,18 @@ async function applyScene() {
   const engine = wantAi ? scene.ai.engine : 'none';
   if (engine !== activeEngine) {
     activeEngine = engine;
-    aiState = engine === 'cloud' ? cloudState : engine === 'local' ? local.state : 'off';
+    aiState = engine === 'cloud' ? cloudState : engine === 'local' ? local.state : engine === 'lite' ? lite.state : 'off';
   }
   compositor.aiFeed = engine === 'cloud';
   if (engine === 'cloud') compositor.setAiSource(aiVideo, () => cloudState === 'generating');
   else if (engine === 'local') compositor.setAiSource(local.canvas, () => local.live);
+  else if (engine === 'lite') compositor.setAiSource(lite.canvas, () => lite.live);
   else compositor.setAiSource(null);
   renderAll();
 
   if (engine !== 'cloud') cloud.setTarget(null);
   if (engine !== 'local') local.setTarget(null);
+  if (engine !== 'lite') lite.setTarget(null);
   if (engine === 'none') return;
 
   let refBlob = null;
@@ -165,6 +180,10 @@ async function applyScene() {
 
   if (engine === 'local') {
     local.setTarget({ refKey, refBlob, enhance: state.settings.faceBoost });
+    return;
+  }
+  if (engine === 'lite') {
+    lite.setTarget({ refKey, refBlob });
     return;
   }
 
@@ -282,6 +301,7 @@ function renderInspector() {
   $('ai-engine').value = scene.ai.engine;
   $('cloud-group').hidden = scene.ai.engine !== 'cloud';
   $('local-group').hidden = scene.ai.engine !== 'local';
+  $('lite-group').hidden = scene.ai.engine !== 'lite';
   $('ai-mode').value = scene.ai.referencePath ? 'edit' : scene.ai.mode;
   $('ai-mode').disabled = Boolean(scene.ai.referencePath);
   setPressed($('toggle-enhance'), scene.ai.enhance);
@@ -300,7 +320,7 @@ function renderPreviewMeta() {
   $('override-badge').hidden = !override;
   $('pipe-source').textContent = override ? 'Webcam' : sourceLabel(scene.source.type);
   // Prompts and styles only mean something to the cloud AI.
-  const isLocal = scene.ai.engine === 'local';
+  const isLocal = scene.ai.engine === 'local' || scene.ai.engine === 'lite';
   $('look-field').hidden = isLocal;
   $('styles-field').hidden = isLocal;
 
@@ -324,7 +344,9 @@ function renderPreviewMeta() {
   const ref = scene.ai.referencePath;
   $('ref-title').textContent = ref ? `Becoming: ${fileName(ref)}` : 'Drop a photo or click to choose';
   $('ref-sub').textContent = ref
-    ? isLocal
+    ? scene.ai.engine === 'lite'
+      ? 'You wear this face. Your eyes, mouth, hair and moves stay yours.'
+      : isLocal
       ? 'Your face becomes this face. Your hair, clothes and moves stay yours.'
       : 'The cloud AI turns you into this person: face, hair and outfit, following your moves.'
     : 'The AI turns you into the person in the photo, following your moves';
@@ -355,6 +377,9 @@ function renderAi() {
   let [text, tone] = AI_TEXT[showing] || [showing, ''];
   if (activeEngine === 'local' && showing === 'generating') text = 'Local face swap live';
   if (activeEngine === 'local' && showing === 'error') text = 'The local face engine hit a problem';
+  if (activeEngine === 'lite' && showing === 'generating') text = lite.faceFound ? 'Lite face warp live' : 'Lite: looking for your face…';
+  if (activeEngine === 'lite' && showing === 'starting') text = 'Starting face tracking…';
+  if (activeEngine === 'lite' && showing === 'error') text = 'Lite face warp hit a problem';
   const status = $('ai-status');
   status.textContent = text;
   status.className = `ai-status${tone ? ` ${tone}` : ''}`;
@@ -362,7 +387,7 @@ function renderAi() {
   const chip = $('pipe-ai');
   const chipText = {
     off: 'AI off',
-    generating: activeEngine === 'local' ? 'AI · local' : 'AI · Decart',
+    generating: activeEngine === 'local' ? 'AI · local' : activeEngine === 'lite' ? 'AI · lite' : 'AI · Decart',
     starting: 'AI starting',
     loading: 'AI starting',
     'needs-models': 'AI needs models',
@@ -412,6 +437,10 @@ function renderLocal() {
   $('btn-boost-download').textContent = busyBoost ? 'Cancel' : 'Download';
   $('btn-boost-download').disabled = Boolean(busyCore);
 
+  const liteLive = activeEngine === 'lite' && lite.state === 'generating';
+  $('lite-stats').textContent = liteLive
+    ? `${lite.stats.fps} frames per second · ${lite.stats.ms} ms each · tracking on the ${lite.delegate === 'GPU' ? 'graphics chip' : 'processor'}`
+    : '';
   const live = activeEngine === 'local' && local.state === 'generating';
   $('local-stats').textContent = live
     ? `${local.stats.fps} swaps per second · ${local.stats.ms} ms each · running on ${local.provider === 'dml' ? 'your graphics card' : local.provider === 'coreml' ? 'your Mac' : 'the processor'}`
@@ -462,9 +491,9 @@ function renderStatus() {
 }
 
 function renderCost() {
-  if (activeEngine === 'local') {
+  if (activeEngine === 'local' || activeEngine === 'lite') {
     $('cost-amount').textContent = 'Free';
-    $('cost-note').textContent = 'The local face swap runs on this computer';
+    $('cost-note').textContent = 'This engine runs on this computer';
     return;
   }
   const minutes = Math.floor(aiSeconds / 60);
@@ -751,7 +780,8 @@ function bindEvents() {
   });
 
   $('ai-engine').addEventListener('change', (e) => {
-    activeScene().ai.engine = e.target.value === 'local' ? 'local' : 'cloud';
+    const value = e.target.value;
+    activeScene().ai.engine = value === 'local' || value === 'lite' ? value : 'cloud';
     changed();
   });
   $('btn-models').addEventListener('click', () => startDownload('core'));
@@ -897,7 +927,7 @@ async function start() {
   setInterval(() => {
     if (activeEngine === 'cloud' && cloudState === 'generating' && !override) aiSeconds += 1;
     renderCost();
-    if (activeEngine === 'local') renderLocal();
+    if (activeEngine === 'local' || activeEngine === 'lite') renderLocal();
     $('foot-fps').textContent = `Output ${compositor.fps} fps`;
   }, 1000);
 
@@ -1031,6 +1061,26 @@ async function runSmokeTest() {
       if (!step.ok) failures.push('the VirtualCam camera did not show the studio picture');
     }
 
+    // Lite face warp on a still photo of a face.
+    if (api.smokeFiles && api.smokeFiles.face && api.smokeFiles.ref) {
+      const scene = makeScene({
+        name: 'Smoke lite warp',
+        source: { type: 'image', filePath: api.smokeFiles.face },
+        ai: { enabled: true, engine: 'lite', referencePath: api.smokeFiles.ref },
+      });
+      state.scenes.push(scene);
+      selectScene(scene.id);
+      const until = Date.now() + 60000;
+      while (Date.now() < until && !(lite.state === 'generating' && lite.faceFound && lite.frame > 10)) await wait(250);
+      const step = { step: 'lite-warp', aiState, delegate: lite.delegate, faceFound: lite.faceFound, frames: lite.frame, ms: lite.stats.ms, fps: lite.stats.fps };
+      if (api.smokeFiles.liteOut) {
+        const png = await new Promise((r) => lite.canvas.toBlob(r, 'image/png'));
+        step.saved = await api.smokeSave(api.smokeFiles.liteOut, new Uint8Array(await png.arrayBuffer()));
+      }
+      report.steps.push(step);
+      if (!(lite.faceFound && lite.frame > 10)) failures.push('lite face warp did not track the face');
+    }
+
     // Local face swap on a still photo of a face, when the test models are available.
     if (api.smokeFiles && api.smokeFiles.face && api.smokeFiles.ref) {
       await refreshModels();
@@ -1059,6 +1109,7 @@ async function runSmokeTest() {
         models: models.core,
         aiState,
         provider: local.provider,
+        gpuFallback: local.fallbackReason,
         swapped: local.lastResultAt > 0,
         live: local.live,
         meanFaceChange: Math.round(diff / (80 * 80 * 3)),

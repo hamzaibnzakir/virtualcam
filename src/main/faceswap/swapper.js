@@ -86,6 +86,7 @@ class FaceSwapper {
     }
 
     let lastError = null;
+    this.fallbackReason = '';
     for (const providers of providerList(preferred)) {
       try {
         const options = {
@@ -111,12 +112,13 @@ class FaceSwapper {
         break;
       } catch (err) {
         lastError = err;
+        this.fallbackReason = `${providers[0]}: ${(err && err.message) || err}`.slice(0, 300);
       }
     }
     if (!this.provider) throw lastError || new Error('Could not load the face models');
 
     this.emap = this.loadEmap(file('swapper'));
-    return { provider: this.provider };
+    return { provider: this.provider, fallbackReason: this.fallbackReason };
   }
 
   // Turns the sharpening pass on or off; loads its model the first time.

@@ -45,10 +45,18 @@ jobs:
           python -m pip install --quiet pillow
           python -c "from PIL import Image; f=Image.new('RGB',(1280,720),(40,44,52)); t=Image.open(r'testdata\faces\SFHQ_pt3_00000058.jpg').convert('RGB').resize((560,560)); f.paste(t,(360,120)); f.save(r'testdata\frame.png')"
 
+      # Registered before the app starts, so the app's camera list (cached by Chromium) includes it.
+      # The app's own Install code still runs inside the test.
+      - name: Register the VirtualCam camera
+        run: |
+          $p = Start-Process -FilePath "$env:WINDIR\System32\regsvr32.exe" -ArgumentList '/s', "`"${{ github.workspace }}\vendor\win\x64\softcam.dll`"" -Wait -PassThru
+          exit $p.ExitCode
+
       - name: App smoke test (camera loopback + model download + local face swap)
         id: smoke
         env:
           VCAM_SMOKE_REAL_DEVICES: '1'
+          VCAM_SMOKE_SOFTWARE_GL: '1'
           VCAM_SMOKE_INSTALL_CAMERA: '1'
           VCAM_SMOKE_DOWNLOAD: '1'
           VCAM_SMOKE_FACE: ${{ github.workspace }}\testdata\frame.png

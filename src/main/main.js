@@ -30,6 +30,11 @@ const MAX_FILE_BYTES = 512 * 1024 * 1024;
 if (SMOKE) {
   // Headless test run: fake camera (unless testing real devices), auto-accept prompts, throwaway profile.
   if (process.env.VCAM_SMOKE_REAL_DEVICES !== '1') app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+  // Test machines without a graphics chip still get WebGL through Chromium's software renderer.
+  if (process.platform === 'linux' || process.env.VCAM_SMOKE_SOFTWARE_GL === '1') {
+    app.commandLine.appendSwitch('use-angle', 'swiftshader');
+    app.commandLine.appendSwitch('enable-unsafe-swiftshader');
+  }
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
   app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'vcam-smoke-')));
 }
@@ -325,6 +330,14 @@ function registerIpc() {
   });
   ipcMain.on('switcher:close', () => hideSwitcher());
 
+  // Bundled files the studio needs as raw bytes (the Lite engine's runtime and model).
+  const ASSETS = new Set(['mediapipe/vision_wasm_internal.wasm', 'mediapipe/face_landmarker.task']);
+  ipcMain.handle('asset:read', async (_e, name) => {
+    if (!ASSETS.has(name)) throw new Error('Unknown asset');
+    const data = await fs.promises.readFile(path.join(DIST, name));
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  });
+
   // ---------- local face engine ----------
   ipcMain.handle('faceengine:start', () => {
     if (!mainWindow) return { ok: false };
@@ -388,6 +401,12 @@ function registerIpc() {
   });
   ipcMain.on('camera:frame', (_e, frame) => {
     if (frame && frame.byteLength) camera.sendFrame(frame);
+  });
+
+  ipcMain.handle('smoke:save', async (_e, filePath, bytes) => {
+    if (!SMOKE || typeof filePath !== 'string' || filePath !== process.env.VCAM_SMOKE_LITE_OUT) return false;
+    await fs.promises.writeFile(filePath, Buffer.from(bytes));
+    return true;
   });
 
   ipcMain.on('smoke:report', async (_e, report) => {

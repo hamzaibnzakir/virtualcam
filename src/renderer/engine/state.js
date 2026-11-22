@@ -6,7 +6,7 @@ export const OUTPUT_FPS = 30;
 
 export const SOURCE_TYPES = ['webcam', 'image', 'video', 'screen', 'card'];
 export const AI_MODES = ['restyle', 'edit'];
-export const AI_ENGINES = ['cloud', 'local'];
+export const AI_ENGINES = ['cloud', 'local', 'lite'];
 
 // Used for the cloud AI when a reference photo is set and no look is typed.
 export const CHARACTER_PROMPT =
@@ -146,6 +146,7 @@ export function sceneKind(scene) {
   const base = sourceLabel(scene.source.type);
   if (!scene.ai.enabled) return base;
   if (scene.ai.engine === 'local') return `${base} + local face swap`;
+  if (scene.ai.engine === 'lite') return `${base} + lite face warp`;
   if (scene.ai.referencePath) return `${base} + cloud character`;
   return `${base} + cloud ${scene.ai.mode === 'edit' ? 'edit' : 'restyle'}`;
 }

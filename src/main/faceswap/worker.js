@@ -30,8 +30,8 @@ async function handle(msg) {
     switch (msg.type) {
       case 'load': {
         swapper = new FaceSwapper(ort, msg.modelsDir);
-        const { provider } = await swapper.load({ preferred: msg.preferred || 'auto' });
-        reply({ type: 'loaded', provider });
+        const { provider, fallbackReason } = await swapper.load({ preferred: msg.preferred || 'auto' });
+        reply({ type: 'loaded', provider, fallbackReason });
         break;
       }
       case 'reference': {

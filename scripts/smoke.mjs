@@ -35,7 +35,9 @@ if (!existsSync(out)) {
 }
 
 const result = JSON.parse(readFileSync(out, 'utf8'));
-const errors = result.console.filter((m) => m.level === 'error');
+// MediaPipe's TensorFlow Lite runtime prints this startup notice on the error stream; it is not an error.
+const harmless = (m) => /^INFO: Created TensorFlow Lite XNNPACK delegate/.test(m.message);
+const errors = result.console.filter((m) => m.level === 'error' && !harmless(m));
 const warnings = result.console.filter((m) => m.level === 'warning');
 
 console.log(JSON.stringify(result.report, null, 2));
