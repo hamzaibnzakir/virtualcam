@@ -1,0 +1,110 @@
+
+> virtualcam@0.1.0 smoke
+> npm run build && node scripts/smoke.mjs
+
+
+> virtualcam@0.1.0 build
+> node scripts/build.mjs
+
+Built renderer into dist/
+Downloading Electron binary...
+{
+  "steps": [
+    {
+      "step": "webcam",
+      "fps": 30,
+      "ready": false,
+      "message": "No camera found.",
+      "pixel": [
+        16,
+        58,
+        122
+      ]
+    },
+    {
+      "step": "ai-without-key",
+      "aiState": "needs-key",
+      "fps": 30,
+      "ready": false,
+      "message": "No camera found.",
+      "pixel": [
+        16,
+        58,
+        122
+      ]
+    },
+    {
+      "step": "card",
+      "fps": 30,
+      "ready": true,
+      "message": "",
+      "pixel": [
+        230,
+        231,
+        234
+      ]
+    },
+    {
+      "step": "panic",
+      "override": true,
+      "fps": 30,
+      "ready": false,
+      "message": "No camera found.",
+      "pixel": [
+        16,
+        58,
+        122
+      ]
+    },
+    {
+      "step": "new-scene-nametag",
+      "scenes": 6,
+      "fps": 30,
+      "ready": false,
+      "message": "No camera found.",
+      "pixel": [
+        16,
+        58,
+        122
+      ]
+    },
+    {
+      "step": "output-window",
+      "open": true
+    },
+SMOKE FAILED
+    {
+      "step": "camera-device",
+      "supported": true,
+      "installed": false,
+      "running": false,
+      "inUse": false,
+      "message": "",
+      "buttonHidden": false
+    },
+    {
+      "step": "ai-bad-key",
+      "aiState": "error",
+      "toast": "Could not start AI: Invalid API key",
+      "fps": 30,
+      "ready": false,
+      "message": "No camera found.",
+      "pixel": [
+        16,
+        58,
+        122
+      ]
+    },
+    {
+      "step": "camera-loopback",
+      "installed": true,
+      "running": true,
+      "listed": false
+    }
+  ],
+  "ok": false,
+  "error": "Error: the VirtualCam camera did not show the studio picture\n    at T6 (file:///D:/a/virtualcam/virtualcam/dist/studio.js:103:183862)"
+}
+Quick switcher: [switcher] rows=5
+
+RESULT smoke=failure installer=skipped
