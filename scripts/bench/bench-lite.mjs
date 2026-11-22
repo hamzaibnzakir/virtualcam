@@ -114,7 +114,7 @@ async function render(mode, renderPairs) {
   cpSync(join(here, 'bench.html'), join(dist, 'bench.html'));
   const wasm = join(root, 'node_modules/@mediapipe/tasks-vision/wasm');
   for (const f of ['vision_wasm_internal.js', 'vision_wasm_internal.wasm']) symlinkSync(join(wasm, f), join(dist, 'mediapipe', f));
-  symlinkSync(join(root, 'assets/mediapipe/face_landmarker.task'), join(dist, 'mediapipe', 'face_landmarker.task'));
+  for (const f of ['face_landmarker.task', 'selfie_multiclass_256x256.tflite']) symlinkSync(join(root, 'assets/mediapipe', f), join(dist, 'mediapipe', f));
 
   const configFile = join(out, 'config.json');
   writeFileSync(configFile, JSON.stringify({ mode, pairs: renderPairs, params, sweep, frames, facesDir, outDir: out, assetsDir: dist, ...(motion ? { motion } : {}) }));
