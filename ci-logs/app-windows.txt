@@ -24,18 +24,18 @@ Downloading Electron binary...
     {
       "step": "ai-without-key",
       "aiState": "needs-key",
-      "fps": 25,
+      "fps": 26,
       "ready": true,
       "message": "",
       "pixel": [
         6,
-        26,
-        17
+        25,
+        18
       ]
     },
     {
       "step": "card",
-      "fps": 25,
+      "fps": 22,
       "ready": true,
       "message": "",
       "pixel": [
@@ -47,19 +47,19 @@ Downloading Electron binary...
     {
       "step": "panic",
       "override": true,
-      "fps": 27,
+      "fps": 28,
       "ready": true,
       "message": "",
       "pixel": [
         220,
-        240,
-        222
+        239,
+        223
       ]
     },
     {
       "step": "new-scene-nametag",
       "scenes": 6,
-      "fps": 25,
+      "fps": 23,
       "ready": true,
       "message": "",
       "pixel": [
@@ -87,7 +87,7 @@ Downloading Electron binary...
       "step": "ai-bad-key",
       "aiState": "error",
       "toast": "Could not start AI: Invalid API key",
-      "fps": 14,
+      "fps": 13,
       "ready": true,
       "message": "",
       "pixel": [
@@ -119,25 +119,47 @@ Downloading Electron binary...
       "delegate": "GPU",
       "faceFound": true,
       "frames": 11,
-      "ms": 139,
+      "ms": 143,
       "fps": 5
     },
     {
       "step": "model-download",
       "ok": true,
-      "seconds": 16
+      "seconds": 20
     },
     {
       "step": "local-swap",
       "models": true,
       "aiState": "generating",
       "provider": "cpu",
-      "gpuFallback": "dml: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFFFE88A880: (caller: 00007FFFFE88AB8A) Exception(1) tid(508) C0262002 Specified display adapter handle is invalid.\r\n",
+      "gpuFallback": "graphics chip 1: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFA4B6DA880: (caller: 00007FFA4B6DAB8A) Exception(1) tid(1e24) C0262002 Specified display adapter handle i",
       "swapped": true,
       "live": true,
       "meanFaceChange": 8,
-      "ms": 7716,
-      "hardware": "cpu-only"
+      "ms": 7601,
+      "hardware": "cpu-only",
+      "gpus": [
+        {
+          "name": "Microsoft Hyper-V Video",
+          "vramMB": 0
+        }
+      ],
+      "gpuSources": {
+        "registry": 1,
+        "wmi": 1
+      },
+      "device": "the processor",
+      "tried": [
+        {
+          "device": "graphics chip 1",
+          "error": "N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFA4B6DA880: (caller: 00007FFA4B6DAB8A) Exception(1) tid(1e24) C0262002 Specified display adapter handle i"
+        },
+        {
+          "device": "the processor",
+          "loadMs": 4122,
+          "swapMs": 5564
+        }
+      ]
     },
     {
       "step": "portrait",
@@ -158,14 +180,14 @@ Downloading Electron binary...
 }
 Quick switcher: [switcher] rows=5
 Console warnings: [
-  'W1122 15:07:07.772999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1122 15:07:07.820000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1122 15:07:07.953999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1122 15:07:07.975000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1122 15:07:08.252000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1122 15:07:08.384999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1122 15:07:08.407000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1122 15:07:08.527000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.'
+  'W1122 17:32:54.902000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1122 17:32:54.944000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 17:32:55.065999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1122 17:32:55.084000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 17:32:55.328999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 17:32:55.443000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1122 17:32:55.464999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1122 17:32:55.576999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.'
 ]
 SMOKE PASSED
 
