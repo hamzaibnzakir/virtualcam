@@ -1,0 +1,29 @@
+
+  amfilter.cpp
+  amvideo.cpp
+  combase.cpp
+  dllentry.cpp
+  DShowSoftcam.cpp
+  FrameBuffer.cpp
+  Misc.cpp
+  SenderAPI.cpp
+  Watchdog.cpp
+  dllsetup.cpp
+  mtype.cpp
+  source.cpp
+  winutil.cpp
+  wxdebug.cpp
+  wxlist.cpp
+  wxutil.cpp
+  softcamcore.vcxproj -> D:\a\virtualcam\virtualcam\native\softcam\src\softcamcore\x64\Release\softcamcore.lib
+  BaseClasses.vcxproj -> D:\a\virtualcam\virtualcam\native\softcam\src\baseclasses\x64\Release\BaseClasses.lib
+  softcam.cpp
+     Creating library D:\a\virtualcam\virtualcam\native\softcam\\x64\Release\softcam.lib and object D:\a\virtualcam\virtualcam\native\softcam\\x64\Release\softcam.exp
+  softcam.vcxproj -> D:\a\virtualcam\virtualcam\native\softcam\x64\Release\softcam.dll
+  Creating dist directory and copying the header and binaries into it.
+  softcam.h -> ...dist\include\softcam\
+          1 file(s) copied.
+  softcam.lib -> ...dist\lib\x64\
+          1 file(s) copied.
+  softcam.dll -> ...dist\bin\x64\
+          1 file(s) copied.
