@@ -47,9 +47,11 @@ const FRESH_MS = 1000;
 //             your own (reshaped) camera picture shows there; 0 = draw the whole outline
 //   maskLo, maskHi: the photo's skin confidence (0..1) where its face starts to show and fully shows
 //   maskStats: 1 = the photo's colour statistics come from its skin only (not its hair or glasses)
-//   maskGlasses: the photo's glasses frames are always painted out of the photo (filled from the skin
-//                around them); this much of the glasses' whole area (frames and lenses) is also cut, so
-//                your camera's own eye area shows there (1 = all of it)
+//   maskPaintGlasses: 1 = the photo's glasses frames are painted out of the photo (filled from the skin
+//                around them); 0 = its glasses are kept, as part of how that person looks (default: the
+//                fill leaves smudges around the eyes and glasses are part of the photo's identity)
+//   maskGlasses: this much of the photo's glasses' whole area (frames and lenses) is cut, so your
+//                camera's own eye area shows there (1 = all of it)
 //   maskGlassesSoft: how soft that cut's edge is, as a share of the face size
 export const liteTuning = {
   shading: 0.15,
@@ -84,6 +86,7 @@ export const liteTuning = {
   maskLo: 0.3,
   maskHi: 0.8,
   maskStats: 1,
+  maskPaintGlasses: 0,
   maskGlasses: 0,
   maskGlassesSoft: 0.04,
 };
@@ -394,8 +397,8 @@ function segmentSkin(segmenter, canvas, oval) {
     const body = masks[2].getAsFloat32Array();
     const face = masks[3].getAsFloat32Array();
     const other = masks.length > 5 ? masks[5].getAsFloat32Array() : new Float32Array(size * size);
-    // Glasses frames (dilated by one cell so their dark edges go too) count as skin: they are painted
-    // out of the photo (see paintOut). The glasses' whole area (frames and lenses: the frames closed
+    // Glasses frames (dilated by one cell so their dark edges go too) count as skin: they are kept, or
+    // painted out of the photo (TUNE.maskPaintGlasses, see paintOut). The glasses' whole area (frames and lenses: the frames closed
     // over, softened) is cut by TUNE.maskGlasses, so your camera's own eye area shows there instead.
     const glasses = rankFilter(other, size, size, 1, true);
     let area = null;
@@ -404,11 +407,13 @@ function segmentSkin(segmenter, canvas, oval) {
       area = boxBlur(closing(glasses, size, size, r), size, size, Math.max(1, Math.round((size / SEG_CROP) * TUNE.maskGlassesSoft)));
     }
     const data = new Uint8Array(size * size);
+    const pure = new Uint8Array(size * size); // skin only (no glasses), for the colour statistics
     for (let i = 0; i < data.length; i += 1) {
+      pure[i] = Math.round(Math.min(1, body[i] + face[i]) * 255);
       const s = Math.min(1, body[i] + face[i] + glasses[i]) * (area ? 1 - Math.min(1, area[i] * 1.5) * TUNE.maskGlasses : 1);
       data[i] = Math.round(s * 255);
     }
-    return { data, glasses, size, x0, y0, side };
+    return { data, pure, glasses, size, x0, y0, side };
   } catch (err) {
     console.warn(`Lite: photo segmentation failed: ${(err && err.message) || err}`);
     return null;
@@ -514,13 +519,14 @@ function paintOut(ctx, width, height, skin) {
   ctx.putImageData(img, bx, by);
 }
 
-// The photo's skin opacity (0..1) at photo pixel (x, y), as the shader computes it.
-function skinAt(skin, x, y) {
+// The photo's skin opacity (0..1) at photo pixel (x, y), as the shader computes it (or from another
+// map of the same square, such as skin.pure).
+function skinAt(skin, x, y, map = skin.data) {
   const s = skin.size;
   const u = Math.floor(((x - skin.x0) / skin.side) * s);
   const v = Math.floor(((y - skin.y0) / skin.side) * s);
   if (u < 0 || v < 0 || u >= s || v >= s) return 1;
-  return smoothstep(TUNE.maskLo, Math.max(TUNE.maskLo + 1e-3, TUNE.maskHi), skin.data[v * s + u] / 255);
+  return smoothstep(TUNE.maskLo, Math.max(TUNE.maskLo + 1e-3, TUNE.maskHi), map[v * s + u] / 255);
 }
 
 // ---------- smoothing: steady when still, no added delay when the head moves ----------
@@ -1143,7 +1149,7 @@ export class LiteFaceAI {
     // The photo's skin (hair, glasses and background inside the outline are left out). If hardly any of
     // the face counts as skin, the segmentation has failed (a drawing, an odd crop): draw it all.
     let skin = this.segmenter && TUNE.mask > 0 ? segmentSkin(this.segmenter, canvas, oval) : null;
-    if (skin) paintOut(ctx, width, height, skin);
+    if (skin && TUNE.maskPaintGlasses > 0) paintOut(ctx, width, height, skin);
     const pixels = ctx.getImageData(0, 0, width, height).data;
     if (skin) {
       let sum = 0;
@@ -1158,7 +1164,7 @@ export class LiteFaceAI {
       skin.coverage = n ? sum / n : 0;
       if (skin.coverage < SKIN_MIN_COVERAGE) skin = null;
     }
-    const weight = skin && TUNE.maskStats ? (x, y) => skinAt(skin, x, y) : null;
+    const weight = skin && TUNE.maskStats ? (x, y) => skinAt(skin, x, y, skin.pure) : null;
     const stats = (weight && labStats(pixels, width, height, oval, weight)) ||
       labStats(pixels, width, height, oval) || {
         mean: [60, 10, 15],
