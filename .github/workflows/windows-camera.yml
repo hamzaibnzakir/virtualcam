@@ -1,0 +1,80 @@
+name: Windows camera
+
+# Builds the VirtualCam camera (64-bit and 32-bit) plus the frame bridge, tests them end to end
+# on Windows, then commits the tested binaries to vendor/win and the log to ci-logs/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/workflows/windows-camera.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-camera
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Prepare log folder
+        run: New-Item -ItemType Directory -Force ci-logs | Out-Null
+
+      - name: Build camera (64-bit)
+        run: msbuild native\softcam\src\softcam\softcam.vcxproj /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:SolutionDir=${{ github.workspace }}\native\softcam\\" 2>&1 | Tee-Object -FilePath ci-logs\build-x64.txt
+
+      - name: Build camera (32-bit)
+        run: msbuild native\softcam\src\softcam\softcam.vcxproj /m /nologo /v:minimal /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=${{ github.workspace }}\native\softcam\\" 2>&1 | Tee-Object -FilePath ci-logs\build-x86.txt
+
+      - name: Build frame bridge
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          cl /nologo /O2 /EHsc /MT /std:c++17 /W4 native\vcam-bridge\vcam-bridge.cpp /Fobuild\ /Fe:build\vcam-bridge.exe 2>&1 | Tee-Object -FilePath ci-logs\build-bridge.txt
+
+      - name: Collect binaries
+        run: |
+          New-Item -ItemType Directory -Force out\x64, out\x86 | Out-Null
+          Copy-Item native\softcam\dist\bin\x64\softcam.dll out\x64\
+          Copy-Item native\softcam\dist\bin\Win32\softcam.dll out\x86\
+          Copy-Item build\vcam-bridge.exe out\x64\
+          Get-ChildItem -Recurse out | Format-Table FullName, Length
+
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Test camera end to end
+        id: test
+        run: |
+          $env:Path = "$env:ProgramData\chocolatey\bin;$env:Path"
+          .\native\ci\test-camera.ps1 -Bin "${{ github.workspace }}\out" -LogFile "${{ github.workspace }}\ci-logs\windows-camera.txt"
+
+      - name: Commit tested binaries and log
+        if: always()
+        run: |
+          git config user.name "virtualcam-ci"
+          git config user.email "virtualcam-ci@users.noreply.github.com"
+          if ("${{ steps.test.outcome }}" -eq "success") {
+            New-Item -ItemType Directory -Force vendor\win\x64, vendor\win\x86 | Out-Null
+            Copy-Item out\x64\* vendor\win\x64\ -Force
+            Copy-Item out\x86\* vendor\win\x86\ -Force
+            git add vendor/win
+          }
+          if (Test-Path ci-logs) { git add ci-logs }
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Windows camera CI: ${{ steps.test.outcome }} [skip ci]"
+            git pull --rebase
+            git push
+          }
