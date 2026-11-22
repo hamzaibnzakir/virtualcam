@@ -1,0 +1,1795 @@
+{
+  "source": "bitmind/SyntheticFacesHQ tiny-sample.zip",
+  "minAge": 25,
+  "excluded": [
+    "SFHQ_pt3_00000399.jpg",
+    "SFHQ_pt3_00000598.jpg",
+    "SFHQ_pt3_00000741.jpg",
+    "SFHQ_pt3_00000801.jpg",
+    "SFHQ_pt3_00001098.jpg",
+    "SFHQ_pt3_00001157.jpg",
+    "SFHQ_pt3_00001415.jpg",
+    "SFHQ_pt3_00001601.jpg",
+    "SFHQ_pt3_00001621.jpg",
+    "SFHQ_pt3_00001629.jpg",
+    "SFHQ_pt3_00002309.jpg",
+    "SFHQ_pt3_00002432.jpg",
+    "SFHQ_pt3_00004727.jpg"
+  ],
+  "faces": [
+    {
+      "file": "SFHQ_pt3_00000010.jpg",
+      "age": 29,
+      "det": 0.884
+    },
+    {
+      "file": "SFHQ_pt3_00000058.jpg",
+      "age": 76,
+      "det": 0.834
+    },
+    {
+      "file": "SFHQ_pt3_00000069.jpg",
+      "age": 58,
+      "det": 0.897
+    },
+    {
+      "file": "SFHQ_pt3_00000075.jpg",
+      "age": 73,
+      "det": 0.845
+    },
+    {
+      "file": "SFHQ_pt3_00000095.jpg",
+      "age": 52,
+      "det": 0.878
+    },
+    {
+      "file": "SFHQ_pt3_00000168.jpg",
+      "age": 24,
+      "det": 0.882
+    },
+    {
+      "file": "SFHQ_pt3_00000170.jpg",
+      "age": 30,
+      "det": 0.855
+    },
+    {
+      "file": "SFHQ_pt3_00000183.jpg",
+      "age": 52,
+      "det": 0.877
+    },
+    {
+      "file": "SFHQ_pt3_00000251.jpg",
+      "age": 36,
+      "det": 0.858
+    },
+    {
+      "file": "SFHQ_pt3_00000281.jpg",
+      "age": 49,
+      "det": 0.878
+    },
+    {
+      "file": "SFHQ_pt3_00000286.jpg",
+      "age": 55,
+      "det": 0.864
+    },
+    {
+      "file": "SFHQ_pt3_00000345.jpg",
+      "age": 49,
+      "det": 0.826
+    },
+    {
+      "file": "SFHQ_pt3_00000373.jpg",
+      "age": 47,
+      "det": 0.885
+    },
+    {
+      "file": "SFHQ_pt3_00000390.jpg",
+      "age": 24,
+      "det": 0.833
+    },
+    {
+      "file": "SFHQ_pt3_00000399.jpg",
+      "age": 55,
+      "det": 0.891
+    },
+    {
+      "file": "SFHQ_pt3_00000411.jpg",
+      "age": 40,
+      "det": 0.871
+    },
+    {
+      "file": "SFHQ_pt3_00000476.jpg",
+      "age": 24,
+      "det": 0.89
+    },
+    {
+      "file": "SFHQ_pt3_00000553.jpg",
+      "age": 31,
+      "det": 0.891
+    },
+    {
+      "file": "SFHQ_pt3_00000555.jpg",
+      "age": 78,
+      "det": 0.845
+    },
+    {
+      "file": "SFHQ_pt3_00000574.jpg",
+      "age": 3,
+      "det": 0.847
+    },
+    {
+      "file": "SFHQ_pt3_00000584.jpg",
+      "age": 22,
+      "det": 0.863
+    },
+    {
+      "file": "SFHQ_pt3_00000588.jpg",
+      "age": 60,
+      "det": 0.839
+    },
+    {
+      "file": "SFHQ_pt3_00000590.jpg",
+      "age": 42,
+      "det": 0.828
+    },
+    {
+      "file": "SFHQ_pt3_00000591.jpg",
+      "age": 49,
+      "det": 0.862
+    },
+    {
+      "file": "SFHQ_pt3_00000598.jpg",
+      "age": 61,
+      "det": 0.851
+    },
+    {
+      "file": "SFHQ_pt3_00000601.jpg",
+      "age": 69,
+      "det": 0.836
+    },
+    {
+      "file": "SFHQ_pt3_00000615.jpg",
+      "age": 51,
+      "det": 0.833
+    },
+    {
+      "file": "SFHQ_pt3_00000632.jpg",
+      "age": 54,
+      "det": 0.87
+    },
+    {
+      "file": "SFHQ_pt3_00000676.jpg",
+      "age": 61,
+      "det": 0.849
+    },
+    {
+      "file": "SFHQ_pt3_00000741.jpg",
+      "age": 27,
+      "det": 0.903
+    },
+    {
+      "file": "SFHQ_pt3_00000758.jpg",
+      "age": 58,
+      "det": 0.855
+    },
+    {
+      "file": "SFHQ_pt3_00000770.jpg",
+      "age": 50,
+      "det": 0.82
+    },
+    {
+      "file": "SFHQ_pt3_00000781.jpg",
+      "age": 38,
+      "det": 0.837
+    },
+    {
+      "file": "SFHQ_pt3_00000791.jpg",
+      "age": 42,
+      "det": 0.877
+    },
+    {
+      "file": "SFHQ_pt3_00000794.jpg",
+      "age": 25,
+      "det": 0.871
+    },
+    {
+      "file": "SFHQ_pt3_00000801.jpg",
+      "age": 26,
+      "det": 0.86
+    },
+    {
+      "file": "SFHQ_pt3_00000805.jpg",
+      "age": 44,
+      "det": 0.829
+    },
+    {
+      "file": "SFHQ_pt3_00000826.jpg",
+      "age": 45,
+      "det": 0.88
+    },
+    {
+      "file": "SFHQ_pt3_00000855.jpg",
+      "age": 74,
+      "det": 0.859
+    },
+    {
+      "file": "SFHQ_pt3_00000876.jpg",
+      "age": 82,
+      "det": 0.809
+    },
+    {
+      "file": "SFHQ_pt3_00000891.jpg",
+      "age": 52,
+      "det": 0.832
+    },
+    {
+      "file": "SFHQ_pt3_00000934.jpg",
+      "age": 73,
+      "det": 0.86
+    },
+    {
+      "file": "SFHQ_pt3_00000953.jpg",
+      "age": 3,
+      "det": 0.882
+    },
+    {
+      "file": "SFHQ_pt3_00000978.jpg",
+      "age": 52,
+      "det": 0.856
+    },
+    {
+      "file": "SFHQ_pt3_00001021.jpg",
+      "age": 44,
+      "det": 0.852
+    },
+    {
+      "file": "SFHQ_pt3_00001032.jpg",
+      "age": 52,
+      "det": 0.873
+    },
+    {
+      "file": "SFHQ_pt3_00001098.jpg",
+      "age": 27,
+      "det": 0.893
+    },
+    {
+      "file": "SFHQ_pt3_00001128.jpg",
+      "age": 32,
+      "det": 0.821
+    },
+    {
+      "file": "SFHQ_pt3_00001157.jpg",
+      "age": 65,
+      "det": 0.835
+    },
+    {
+      "file": "SFHQ_pt3_00001178.jpg",
+      "age": 30,
+      "det": 0.895
+    },
+    {
+      "file": "SFHQ_pt3_00001206.jpg",
+      "age": 45,
+      "det": 0.872
+    },
+    {
+      "file": "SFHQ_pt3_00001269.jpg",
+      "age": 28,
+      "det": 0.882
+    },
+    {
+      "file": "SFHQ_pt3_00001278.jpg",
+      "age": 75,
+      "det": 0.879
+    },
+    {
+      "file": "SFHQ_pt3_00001290.jpg",
+      "age": 25,
+      "det": 0.891
+    },
+    {
+      "file": "SFHQ_pt3_00001372.jpg",
+      "age": 46,
+      "det": 0.833
+    },
+    {
+      "file": "SFHQ_pt3_00001374.jpg",
+      "age": 30,
+      "det": 0.844
+    },
+    {
+      "file": "SFHQ_pt3_00001402.jpg",
+      "age": 23,
+      "det": 0.846
+    },
+    {
+      "file": "SFHQ_pt3_00001415.jpg",
+      "age": 37,
+      "det": 0.853
+    },
+    {
+      "file": "SFHQ_pt3_00001429.jpg",
+      "age": 65,
+      "det": 0.833
+    },
+    {
+      "file": "SFHQ_pt3_00001451.jpg",
+      "age": 6,
+      "det": 0.854
+    },
+    {
+      "file": "SFHQ_pt3_00001472.jpg",
+      "age": 38,
+      "det": 0.874
+    },
+    {
+      "file": "SFHQ_pt3_00001480.jpg",
+      "age": 22,
+      "det": 0.857
+    },
+    {
+      "file": "SFHQ_pt3_00001576.jpg",
+      "age": 43,
+      "det": 0.88
+    },
+    {
+      "file": "SFHQ_pt3_00001601.jpg",
+      "age": 26,
+      "det": 0.846
+    },
+    {
+      "file": "SFHQ_pt3_00001621.jpg",
+      "age": 25,
+      "det": 0.886
+    },
+    {
+      "file": "SFHQ_pt3_00001629.jpg",
+      "age": 37,
+      "det": 0.841
+    },
+    {
+      "file": "SFHQ_pt3_00001658.jpg",
+      "age": 25,
+      "det": 0.887
+    },
+    {
+      "file": "SFHQ_pt3_00001664.jpg",
+      "age": 32,
+      "det": 0.823
+    },
+    {
+      "file": "SFHQ_pt3_00001754.jpg",
+      "age": 24,
+      "det": 0.863
+    },
+    {
+      "file": "SFHQ_pt3_00001758.jpg",
+      "age": 41,
+      "det": 0.86
+    },
+    {
+      "file": "SFHQ_pt3_00001767.jpg",
+      "age": 69,
+      "det": 0.863
+    },
+    {
+      "file": "SFHQ_pt3_00001771.jpg",
+      "age": 49,
+      "det": 0.835
+    },
+    {
+      "file": "SFHQ_pt3_00001783.jpg",
+      "age": 31,
+      "det": 0.873
+    },
+    {
+      "file": "SFHQ_pt3_00001788.jpg",
+      "age": 55,
+      "det": 0.866
+    },
+    {
+      "file": "SFHQ_pt3_00001801.jpg",
+      "age": 48,
+      "det": 0.901
+    },
+    {
+      "file": "SFHQ_pt3_00001810.jpg",
+      "age": 82,
+      "det": 0.856
+    },
+    {
+      "file": "SFHQ_pt3_00001839.jpg",
+      "age": 22,
+      "det": 0.832
+    },
+    {
+      "file": "SFHQ_pt3_00001842.jpg",
+      "age": 29,
+      "det": 0.846
+    },
+    {
+      "file": "SFHQ_pt3_00001885.jpg",
+      "age": 30,
+      "det": 0.849
+    },
+    {
+      "file": "SFHQ_pt3_00001903.jpg",
+      "age": 30,
+      "det": 0.851
+    },
+    {
+      "file": "SFHQ_pt3_00001918.jpg",
+      "age": 67,
+      "det": 0.842
+    },
+    {
+      "file": "SFHQ_pt3_00001922.jpg",
+      "age": 22,
+      "det": 0.825
+    },
+    {
+      "file": "SFHQ_pt3_00001964.jpg",
+      "age": 60,
+      "det": 0.82
+    },
+    {
+      "file": "SFHQ_pt3_00001976.jpg",
+      "age": 52,
+      "det": 0.874
+    },
+    {
+      "file": "SFHQ_pt3_00001989.jpg",
+      "age": 35,
+      "det": 0.853
+    },
+    {
+      "file": "SFHQ_pt3_00002045.jpg",
+      "age": 59,
+      "det": 0.86
+    },
+    {
+      "file": "SFHQ_pt3_00002059.jpg",
+      "age": 26,
+      "det": 0.816
+    },
+    {
+      "file": "SFHQ_pt3_00002067.jpg",
+      "age": 34,
+      "det": 0.888
+    },
+    {
+      "file": "SFHQ_pt3_00002071.jpg",
+      "age": 53,
+      "det": 0.864
+    },
+    {
+      "file": "SFHQ_pt3_00002078.jpg",
+      "age": 54,
+      "det": 0.863
+    },
+    {
+      "file": "SFHQ_pt3_00002115.jpg",
+      "age": 77,
+      "det": 0.867
+    },
+    {
+      "file": "SFHQ_pt3_00002172.jpg",
+      "age": 27,
+      "det": 0.837
+    },
+    {
+      "file": "SFHQ_pt3_00002196.jpg",
+      "age": 60,
+      "det": 0.88
+    },
+    {
+      "file": "SFHQ_pt3_00002197.jpg",
+      "age": 32,
+      "det": 0.883
+    },
+    {
+      "file": "SFHQ_pt3_00002231.jpg",
+      "age": 48,
+      "det": 0.874
+    },
+    {
+      "file": "SFHQ_pt3_00002238.jpg",
+      "age": 85,
+      "det": 0.804
+    },
+    {
+      "file": "SFHQ_pt3_00002286.jpg",
+      "age": 74,
+      "det": 0.869
+    },
+    {
+      "file": "SFHQ_pt3_00002295.jpg",
+      "age": 49,
+      "det": 0.9
+    },
+    {
+      "file": "SFHQ_pt3_00002309.jpg",
+      "age": 25,
+      "det": 0.868
+    },
+    {
+      "file": "SFHQ_pt3_00002341.jpg",
+      "age": 49,
+      "det": 0.84
+    },
+    {
+      "file": "SFHQ_pt3_00002355.jpg",
+      "age": 32,
+      "det": 0.802
+    },
+    {
+      "file": "SFHQ_pt3_00002381.jpg",
+      "age": 26,
+      "det": 0.864
+    },
+    {
+      "file": "SFHQ_pt3_00002417.jpg",
+      "age": 52,
+      "det": 0.881
+    },
+    {
+      "file": "SFHQ_pt3_00002418.jpg",
+      "age": 76,
+      "det": 0.849
+    },
+    {
+      "file": "SFHQ_pt3_00002432.jpg",
+      "age": 43,
+      "det": 0.903
+    },
+    {
+      "file": "SFHQ_pt3_00002468.jpg",
+      "age": 39,
+      "det": 0.867
+    },
+    {
+      "file": "SFHQ_pt3_00002479.jpg",
+      "age": 38,
+      "det": 0.813
+    },
+    {
+      "file": "SFHQ_pt3_00002482.jpg",
+      "age": 22,
+      "det": 0.834
+    },
+    {
+      "file": "SFHQ_pt3_00002504.jpg",
+      "age": 39,
+      "det": 0.875
+    },
+    {
+      "file": "SFHQ_pt3_00002506.jpg",
+      "age": 50,
+      "det": 0.849
+    },
+    {
+      "file": "SFHQ_pt3_00002658.jpg",
+      "age": 77,
+      "det": 0.832
+    },
+    {
+      "file": "SFHQ_pt3_00003503.jpg",
+      "age": 26,
+      "det": 0.821
+    },
+    {
+      "file": "SFHQ_pt3_00003664.jpg",
+      "age": 29,
+      "det": 0.867
+    },
+    {
+      "file": "SFHQ_pt3_00003679.jpg",
+      "age": 31,
+      "det": 0.878
+    },
+    {
+      "file": "SFHQ_pt3_00003719.jpg",
+      "age": 68,
+      "det": 0.909
+    },
+    {
+      "file": "SFHQ_pt3_00003847.jpg",
+      "age": 66,
+      "det": 0.878
+    },
+    {
+      "file": "SFHQ_pt3_00003881.jpg",
+      "age": 59,
+      "det": 0.847
+    },
+    {
+      "file": "SFHQ_pt3_00004118.jpg",
+      "age": 30,
+      "det": 0.839
+    },
+    {
+      "file": "SFHQ_pt3_00004198.jpg",
+      "age": 38,
+      "det": 0.888
+    },
+    {
+      "file": "SFHQ_pt3_00004310.jpg",
+      "age": 31,
+      "det": 0.85
+    },
+    {
+      "file": "SFHQ_pt3_00004317.jpg",
+      "age": 40,
+      "det": 0.856
+    },
+    {
+      "file": "SFHQ_pt3_00004369.jpg",
+      "age": 24,
+      "det": 0.862
+    },
+    {
+      "file": "SFHQ_pt3_00004473.jpg",
+      "age": 46,
+      "det": 0.866
+    },
+    {
+      "file": "SFHQ_pt3_00004532.jpg",
+      "age": 28,
+      "det": 0.839
+    },
+    {
+      "file": "SFHQ_pt3_00004633.jpg",
+      "age": 56,
+      "det": 0.881
+    },
+    {
+      "file": "SFHQ_pt3_00004668.jpg",
+      "age": 24,
+      "det": 0.839
+    },
+    {
+      "file": "SFHQ_pt3_00004689.jpg",
+      "age": 74,
+      "det": 0.806
+    },
+    {
+      "file": "SFHQ_pt3_00004722.jpg",
+      "age": 36,
+      "det": 0.839
+    },
+    {
+      "file": "SFHQ_pt3_00004727.jpg",
+      "age": 32,
+      "det": 0.888
+    },
+    {
+      "file": "SFHQ_pt3_00004785.jpg",
+      "age": 51,
+      "det": 0.868
+    }
+  ],
+  "pairs": [
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002115.jpg",
+      "target": "SFHQ_pt3_00003847.jpg",
+      "frame": {
+        "size": 640,
+        "x": 238,
+        "y": 2,
+        "tilt": 1
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000010.jpg",
+      "target": "SFHQ_pt3_00002115.jpg",
+      "frame": {
+        "size": 629,
+        "x": 426,
+        "y": 61,
+        "tilt": 5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001767.jpg",
+      "target": "SFHQ_pt3_00000553.jpg",
+      "frame": {
+        "size": 459,
+        "x": 504,
+        "y": 83,
+        "tilt": 3
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001269.jpg",
+      "target": "SFHQ_pt3_00000010.jpg",
+      "frame": {
+        "size": 625,
+        "x": 217,
+        "y": 56,
+        "tilt": -1
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001372.jpg",
+      "target": "SFHQ_pt3_00001269.jpg",
+      "frame": {
+        "size": 651,
+        "x": 348,
+        "y": 1,
+        "tilt": 6
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001178.jpg",
+      "target": "SFHQ_pt3_00001767.jpg",
+      "frame": {
+        "size": 494,
+        "x": 514,
+        "y": 133,
+        "tilt": 6
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002172.jpg",
+      "target": "SFHQ_pt3_00001372.jpg",
+      "frame": {
+        "size": 613,
+        "x": 190,
+        "y": 100,
+        "tilt": 8
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001658.jpg",
+      "target": "SFHQ_pt3_00002172.jpg",
+      "frame": {
+        "size": 619,
+        "x": 269,
+        "y": 10,
+        "tilt": -5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00004317.jpg",
+      "target": "SFHQ_pt3_00001178.jpg",
+      "frame": {
+        "size": 471,
+        "x": 359,
+        "y": 172,
+        "tilt": -2
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001810.jpg",
+      "target": "SFHQ_pt3_00001658.jpg",
+      "frame": {
+        "size": 604,
+        "x": 256,
+        "y": 32,
+        "tilt": 2
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002658.jpg",
+      "target": "SFHQ_pt3_00001810.jpg",
+      "frame": {
+        "size": 575,
+        "x": 328,
+        "y": 65,
+        "tilt": -1
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001801.jpg",
+      "target": "SFHQ_pt3_00004317.jpg",
+      "frame": {
+        "size": 491,
+        "x": 322,
+        "y": 167,
+        "tilt": 4
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000373.jpg",
+      "target": "SFHQ_pt3_00002658.jpg",
+      "frame": {
+        "size": 506,
+        "x": 273,
+        "y": 128,
+        "tilt": 5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001842.jpg",
+      "target": "SFHQ_pt3_00000373.jpg",
+      "frame": {
+        "size": 550,
+        "x": 429,
+        "y": 26,
+        "tilt": -3
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000588.jpg",
+      "target": "SFHQ_pt3_00001801.jpg",
+      "frame": {
+        "size": 549,
+        "x": 513,
+        "y": 133,
+        "tilt": 5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002238.jpg",
+      "target": "SFHQ_pt3_00001842.jpg",
+      "frame": {
+        "size": 465,
+        "x": 458,
+        "y": 124,
+        "tilt": 0
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001788.jpg",
+      "target": "SFHQ_pt3_00002238.jpg",
+      "frame": {
+        "size": 677,
+        "x": 441,
+        "y": 72,
+        "tilt": -8
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001278.jpg",
+      "target": "SFHQ_pt3_00000588.jpg",
+      "frame": {
+        "size": 669,
+        "x": 193,
+        "y": 45,
+        "tilt": 5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001989.jpg",
+      "target": "SFHQ_pt3_00001788.jpg",
+      "frame": {
+        "size": 650,
+        "x": 362,
+        "y": 18,
+        "tilt": -3
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002417.jpg",
+      "target": "SFHQ_pt3_00001989.jpg",
+      "frame": {
+        "size": 671,
+        "x": 345,
+        "y": 49,
+        "tilt": 4
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001783.jpg",
+      "target": "SFHQ_pt3_00001278.jpg",
+      "frame": {
+        "size": 473,
+        "x": 357,
+        "y": 148,
+        "tilt": 7
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000676.jpg",
+      "target": "SFHQ_pt3_00002417.jpg",
+      "frame": {
+        "size": 583,
+        "x": 316,
+        "y": 60,
+        "tilt": 6
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000781.jpg",
+      "target": "SFHQ_pt3_00000676.jpg",
+      "frame": {
+        "size": 654,
+        "x": 383,
+        "y": 36,
+        "tilt": -5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00003664.jpg",
+      "target": "SFHQ_pt3_00001783.jpg",
+      "frame": {
+        "size": 675,
+        "x": 344,
+        "y": 18,
+        "tilt": 0
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002506.jpg",
+      "target": "SFHQ_pt3_00000781.jpg",
+      "frame": {
+        "size": 455,
+        "x": 465,
+        "y": 182,
+        "tilt": 7
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001976.jpg",
+      "target": "SFHQ_pt3_00002506.jpg",
+      "frame": {
+        "size": 486,
+        "x": 481,
+        "y": 147,
+        "tilt": -7
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002504.jpg",
+      "target": "SFHQ_pt3_00003664.jpg",
+      "frame": {
+        "size": 491,
+        "x": 419,
+        "y": 127,
+        "tilt": -1
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00004785.jpg",
+      "target": "SFHQ_pt3_00001976.jpg",
+      "frame": {
+        "size": 443,
+        "x": 426,
+        "y": 131,
+        "tilt": -2
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000058.jpg",
+      "target": "SFHQ_pt3_00004785.jpg",
+      "frame": {
+        "size": 475,
+        "x": 412,
+        "y": 173,
+        "tilt": -7
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001290.jpg",
+      "target": "SFHQ_pt3_00002504.jpg",
+      "frame": {
+        "size": 600,
+        "x": 445,
+        "y": 13,
+        "tilt": 2
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00003679.jpg",
+      "target": "SFHQ_pt3_00000058.jpg",
+      "frame": {
+        "size": 664,
+        "x": 388,
+        "y": 62,
+        "tilt": -3
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000615.jpg",
+      "target": "SFHQ_pt3_00003679.jpg",
+      "frame": {
+        "size": 509,
+        "x": 352,
+        "y": 88,
+        "tilt": -1
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000601.jpg",
+      "target": "SFHQ_pt3_00001290.jpg",
+      "frame": {
+        "size": 638,
+        "x": 205,
+        "y": 92,
+        "tilt": -4
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000632.jpg",
+      "target": "SFHQ_pt3_00000615.jpg",
+      "frame": {
+        "size": 651,
+        "x": 387,
+        "y": 40,
+        "tilt": 4
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000876.jpg",
+      "target": "SFHQ_pt3_00000632.jpg",
+      "frame": {
+        "size": 560,
+        "x": 500,
+        "y": 126,
+        "tilt": -2
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000345.jpg",
+      "target": "SFHQ_pt3_00000601.jpg",
+      "frame": {
+        "size": 482,
+        "x": 274,
+        "y": 68,
+        "tilt": -6
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002197.jpg",
+      "target": "SFHQ_pt3_00000876.jpg",
+      "frame": {
+        "size": 626,
+        "x": 266,
+        "y": 74,
+        "tilt": -2
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002059.jpg",
+      "target": "SFHQ_pt3_00002197.jpg",
+      "frame": {
+        "size": 592,
+        "x": 277,
+        "y": 92,
+        "tilt": 2
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00003719.jpg",
+      "target": "SFHQ_pt3_00000345.jpg",
+      "frame": {
+        "size": 666,
+        "x": 222,
+        "y": 44,
+        "tilt": 0
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000805.jpg",
+      "target": "SFHQ_pt3_00002059.jpg",
+      "frame": {
+        "size": 478,
+        "x": 259,
+        "y": 177,
+        "tilt": 3
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002078.jpg",
+      "target": "SFHQ_pt3_00000805.jpg",
+      "frame": {
+        "size": 627,
+        "x": 300,
+        "y": 96,
+        "tilt": 5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000591.jpg",
+      "target": "SFHQ_pt3_00003719.jpg",
+      "frame": {
+        "size": 648,
+        "x": 385,
+        "y": 39,
+        "tilt": 6
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002418.jpg",
+      "target": "SFHQ_pt3_00002078.jpg",
+      "frame": {
+        "size": 598,
+        "x": 419,
+        "y": 108,
+        "tilt": -8
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000251.jpg",
+      "target": "SFHQ_pt3_00002418.jpg",
+      "frame": {
+        "size": 421,
+        "x": 422,
+        "y": 149,
+        "tilt": -7
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000891.jpg",
+      "target": "SFHQ_pt3_00000591.jpg",
+      "frame": {
+        "size": 562,
+        "x": 278,
+        "y": 32,
+        "tilt": 5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000069.jpg",
+      "target": "SFHQ_pt3_00000251.jpg",
+      "frame": {
+        "size": 492,
+        "x": 498,
+        "y": 67,
+        "tilt": 0
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00004310.jpg",
+      "target": "SFHQ_pt3_00000069.jpg",
+      "frame": {
+        "size": 522,
+        "x": 278,
+        "y": 87,
+        "tilt": 3
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001472.jpg",
+      "target": "SFHQ_pt3_00000891.jpg",
+      "frame": {
+        "size": 427,
+        "x": 344,
+        "y": 144,
+        "tilt": -4
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001758.jpg",
+      "target": "SFHQ_pt3_00004310.jpg",
+      "frame": {
+        "size": 550,
+        "x": 420,
+        "y": 90,
+        "tilt": -5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002355.jpg",
+      "target": "SFHQ_pt3_00001758.jpg",
+      "frame": {
+        "size": 486,
+        "x": 424,
+        "y": 128,
+        "tilt": 0
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002196.jpg",
+      "target": "SFHQ_pt3_00001472.jpg",
+      "frame": {
+        "size": 502,
+        "x": 321,
+        "y": 84,
+        "tilt": 1
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000590.jpg",
+      "target": "SFHQ_pt3_00002355.jpg",
+      "frame": {
+        "size": 650,
+        "x": 215,
+        "y": 47,
+        "tilt": 7
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00004633.jpg",
+      "target": "SFHQ_pt3_00000590.jpg",
+      "frame": {
+        "size": 559,
+        "x": 380,
+        "y": 33,
+        "tilt": 0
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00003881.jpg",
+      "target": "SFHQ_pt3_00002196.jpg",
+      "frame": {
+        "size": 429,
+        "x": 550,
+        "y": 95,
+        "tilt": -4
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00004722.jpg",
+      "target": "SFHQ_pt3_00004633.jpg",
+      "frame": {
+        "size": 435,
+        "x": 536,
+        "y": 84,
+        "tilt": -3
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002286.jpg",
+      "target": "SFHQ_pt3_00004722.jpg",
+      "frame": {
+        "size": 597,
+        "x": 210,
+        "y": 72,
+        "tilt": 4
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00002341.jpg",
+      "target": "SFHQ_pt3_00003881.jpg",
+      "frame": {
+        "size": 465,
+        "x": 465,
+        "y": 175,
+        "tilt": -6
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001903.jpg",
+      "target": "SFHQ_pt3_00002286.jpg",
+      "frame": {
+        "size": 541,
+        "x": 397,
+        "y": 33,
+        "tilt": 1
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000095.jpg",
+      "target": "SFHQ_pt3_00001903.jpg",
+      "frame": {
+        "size": 552,
+        "x": 466,
+        "y": 111,
+        "tilt": -6
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001664.jpg",
+      "target": "SFHQ_pt3_00002341.jpg",
+      "frame": {
+        "size": 433,
+        "x": 376,
+        "y": 185,
+        "tilt": -5
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000978.jpg",
+      "target": "SFHQ_pt3_00000095.jpg",
+      "frame": {
+        "size": 567,
+        "x": 423,
+        "y": 97,
+        "tilt": 2
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000281.jpg",
+      "target": "SFHQ_pt3_00000978.jpg",
+      "frame": {
+        "size": 614,
+        "x": 449,
+        "y": 55,
+        "tilt": -7
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000411.jpg",
+      "target": "SFHQ_pt3_00001664.jpg",
+      "frame": {
+        "size": 559,
+        "x": 247,
+        "y": 22,
+        "tilt": -6
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00001576.jpg",
+      "target": "SFHQ_pt3_00000281.jpg",
+      "frame": {
+        "size": 543,
+        "x": 282,
+        "y": 116,
+        "tilt": -8
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00003847.jpg",
+      "target": "SFHQ_pt3_00001576.jpg",
+      "frame": {
+        "size": 423,
+        "x": 298,
+        "y": 99,
+        "tilt": 1
+      }
+    },
+    {
+      "split": "train",
+      "ref": "SFHQ_pt3_00000553.jpg",
+      "target": "SFHQ_pt3_00000411.jpg",
+      "frame": {
+        "size": 532,
+        "x": 445,
+        "y": 136,
+        "tilt": 0
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001128.jpg",
+      "target": "SFHQ_pt3_00004532.jpg",
+      "frame": {
+        "size": 597,
+        "x": 266,
+        "y": 10,
+        "tilt": 4
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001771.jpg",
+      "target": "SFHQ_pt3_00001128.jpg",
+      "frame": {
+        "size": 465,
+        "x": 348,
+        "y": 81,
+        "tilt": 5
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00002381.jpg",
+      "target": "SFHQ_pt3_00001918.jpg",
+      "frame": {
+        "size": 658,
+        "x": 243,
+        "y": -20,
+        "tilt": -8
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00002231.jpg",
+      "target": "SFHQ_pt3_00001771.jpg",
+      "frame": {
+        "size": 497,
+        "x": 510,
+        "y": 108,
+        "tilt": -5
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00004689.jpg",
+      "target": "SFHQ_pt3_00002231.jpg",
+      "frame": {
+        "size": 530,
+        "x": 417,
+        "y": 136,
+        "tilt": -2
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000855.jpg",
+      "target": "SFHQ_pt3_00002381.jpg",
+      "frame": {
+        "size": 668,
+        "x": 275,
+        "y": 32,
+        "tilt": -4
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00004118.jpg",
+      "target": "SFHQ_pt3_00004689.jpg",
+      "frame": {
+        "size": 458,
+        "x": 391,
+        "y": 127,
+        "tilt": -7
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001374.jpg",
+      "target": "SFHQ_pt3_00004118.jpg",
+      "frame": {
+        "size": 594,
+        "x": 462,
+        "y": 33,
+        "tilt": 1
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001885.jpg",
+      "target": "SFHQ_pt3_00000855.jpg",
+      "frame": {
+        "size": 674,
+        "x": 270,
+        "y": -2,
+        "tilt": 4
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000770.jpg",
+      "target": "SFHQ_pt3_00001374.jpg",
+      "frame": {
+        "size": 474,
+        "x": 429,
+        "y": 108,
+        "tilt": 2
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001429.jpg",
+      "target": "SFHQ_pt3_00000770.jpg",
+      "frame": {
+        "size": 471,
+        "x": 454,
+        "y": 167,
+        "tilt": -5
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000075.jpg",
+      "target": "SFHQ_pt3_00001885.jpg",
+      "frame": {
+        "size": 465,
+        "x": 270,
+        "y": 122,
+        "tilt": -3
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00004473.jpg",
+      "target": "SFHQ_pt3_00001429.jpg",
+      "frame": {
+        "size": 663,
+        "x": 395,
+        "y": 79,
+        "tilt": -3
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00002295.jpg",
+      "target": "SFHQ_pt3_00004473.jpg",
+      "frame": {
+        "size": 471,
+        "x": 299,
+        "y": 157,
+        "tilt": 7
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001964.jpg",
+      "target": "SFHQ_pt3_00000075.jpg",
+      "frame": {
+        "size": 638,
+        "x": 364,
+        "y": 8,
+        "tilt": 3
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00002067.jpg",
+      "target": "SFHQ_pt3_00002295.jpg",
+      "frame": {
+        "size": 537,
+        "x": 445,
+        "y": 114,
+        "tilt": -8
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000794.jpg",
+      "target": "SFHQ_pt3_00002067.jpg",
+      "frame": {
+        "size": 574,
+        "x": 444,
+        "y": 83,
+        "tilt": -1
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00002045.jpg",
+      "target": "SFHQ_pt3_00001964.jpg",
+      "frame": {
+        "size": 661,
+        "x": 245,
+        "y": 6,
+        "tilt": -5
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000170.jpg",
+      "target": "SFHQ_pt3_00000794.jpg",
+      "frame": {
+        "size": 430,
+        "x": 508,
+        "y": 100,
+        "tilt": 4
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000183.jpg",
+      "target": "SFHQ_pt3_00000170.jpg",
+      "frame": {
+        "size": 592,
+        "x": 470,
+        "y": 77,
+        "tilt": -2
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000791.jpg",
+      "target": "SFHQ_pt3_00002045.jpg",
+      "frame": {
+        "size": 426,
+        "x": 311,
+        "y": 108,
+        "tilt": -5
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00004198.jpg",
+      "target": "SFHQ_pt3_00000183.jpg",
+      "frame": {
+        "size": 450,
+        "x": 424,
+        "y": 124,
+        "tilt": -3
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00002479.jpg",
+      "target": "SFHQ_pt3_00004198.jpg",
+      "frame": {
+        "size": 615,
+        "x": 266,
+        "y": 72,
+        "tilt": 1
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00002071.jpg",
+      "target": "SFHQ_pt3_00000791.jpg",
+      "frame": {
+        "size": 468,
+        "x": 279,
+        "y": 99,
+        "tilt": 0
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000555.jpg",
+      "target": "SFHQ_pt3_00002479.jpg",
+      "frame": {
+        "size": 440,
+        "x": 534,
+        "y": 107,
+        "tilt": 6
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00003503.jpg",
+      "target": "SFHQ_pt3_00000555.jpg",
+      "frame": {
+        "size": 424,
+        "x": 291,
+        "y": 195,
+        "tilt": 2
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001032.jpg",
+      "target": "SFHQ_pt3_00002071.jpg",
+      "frame": {
+        "size": 529,
+        "x": 301,
+        "y": 155,
+        "tilt": 4
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00002468.jpg",
+      "target": "SFHQ_pt3_00003503.jpg",
+      "frame": {
+        "size": 672,
+        "x": 442,
+        "y": 35,
+        "tilt": 7
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000758.jpg",
+      "target": "SFHQ_pt3_00002468.jpg",
+      "frame": {
+        "size": 613,
+        "x": 418,
+        "y": 88,
+        "tilt": -7
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001021.jpg",
+      "target": "SFHQ_pt3_00001032.jpg",
+      "frame": {
+        "size": 551,
+        "x": 296,
+        "y": 98,
+        "tilt": -7
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000286.jpg",
+      "target": "SFHQ_pt3_00000758.jpg",
+      "frame": {
+        "size": 568,
+        "x": 290,
+        "y": 129,
+        "tilt": -6
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000826.jpg",
+      "target": "SFHQ_pt3_00000286.jpg",
+      "frame": {
+        "size": 568,
+        "x": 392,
+        "y": 101,
+        "tilt": 7
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001206.jpg",
+      "target": "SFHQ_pt3_00001021.jpg",
+      "frame": {
+        "size": 652,
+        "x": 261,
+        "y": 29,
+        "tilt": -2
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00000934.jpg",
+      "target": "SFHQ_pt3_00000826.jpg",
+      "frame": {
+        "size": 581,
+        "x": 375,
+        "y": 125,
+        "tilt": 5
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00004532.jpg",
+      "target": "SFHQ_pt3_00000934.jpg",
+      "frame": {
+        "size": 527,
+        "x": 283,
+        "y": 84,
+        "tilt": 2
+      }
+    },
+    {
+      "split": "holdout",
+      "ref": "SFHQ_pt3_00001918.jpg",
+      "target": "SFHQ_pt3_00001206.jpg",
+      "frame": {
+        "size": 432,
+        "x": 502,
+        "y": 109,
+        "tilt": 7
+      }
+    }
+  ]
+}

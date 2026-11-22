@@ -11,8 +11,13 @@ import Delaunator from 'delaunator';
 import { output } from './state.js';
 
 const FRESH_MS = 1000;
-// How much of the camera's lighting and skin detail is laid over the photo's face.
-const TUNE = { shading: 0.2, detail: 0.05, blurDiv: 10, contrast: 0.5 };
+// Tunable look of the Lite engine (the benchmark adjusts these; the app uses the defaults).
+//   shading:  how much of the camera's broad lighting is laid over the photo's face
+//   detail:   how much of the camera's fine skin detail/highlights is added back
+//   blurDiv:  lighting blur radius = face width / blurDiv
+//   contrast: 0 = take the camera's colour contrast, 1 = keep the photo's
+export const liteTuning = { shading: 0.2, detail: 0.05, blurDiv: 10, contrast: 0.5 };
+const TUNE = liteTuning;
 const MESH_POINTS = 468; // 0..467 are the face; 468..477 are the irises
 const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
 const RIGHT_EYE = [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7];
