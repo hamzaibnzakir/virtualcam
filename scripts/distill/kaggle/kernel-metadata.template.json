@@ -1,0 +1,19 @@
+{
+  "id": "KAGGLE_USERNAME/virtualcam-distill-RUN",
+  "title": "virtualcam-distill-RUN",
+  "code_file": "kaggle_run.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "KAGGLE_USERNAME/virtualcam-distill-kit",
+    "selfishgene/synthetic-faces-high-quality-sfhq-part-1",
+    "selfishgene/synthetic-faces-high-quality-sfhq-part-2",
+    "selfishgene/synthetic-faces-high-quality-sfhq-part-3"
+  ],
+  "kernel_sources": [],
+  "competition_sources": []
+}

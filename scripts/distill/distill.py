@@ -91,7 +91,15 @@ def main():
 
     torch.manual_seed(args.workers_seed)
     dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    amp = dict(device_type='cuda', dtype=torch.bfloat16) if dev.type == 'cuda' else dict(device_type='cpu', enabled=False)
+    # bfloat16 on cards that have it (RTX 30/40, A100, H100); float16 with loss scaling on older ones (T4, P100).
+    if dev.type == 'cuda':
+        half = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        amp = dict(device_type='cuda', dtype=half)
+    else:
+        half = None
+        amp = dict(device_type='cpu', enabled=False)
+    scaler = torch.amp.GradScaler('cuda', enabled=half == torch.float16)
+    teacher_amp = dict(amp)
     os.makedirs(os.path.join(args.out, 'samples'), exist_ok=True)
     with open(os.path.join(args.out, 'args.json'), 'w') as f:
         json.dump(vars(args), f, indent=2)
@@ -112,6 +120,20 @@ def main():
     import gc
 
     gc.collect()
+    # The teacher must give the same pictures in half precision; if not, it runs in full precision (slower).
+    if dev.type == 'cuda':
+        with torch.no_grad():
+            x = torch.from_numpy(crops[:8]).to(dev).permute(0, 3, 1, 2).float() / 255
+            z = F.normalize(torch.from_numpy(embs[8:16]).to(dev) @ torch.from_numpy(
+                emap_from_swapper(os.path.join(args.models, 'inswapper_128.onnx'))).to(dev), dim=1)
+            full = teacher(x, z).float()
+            with torch.autocast(**amp):
+                fast = teacher(x, z).float()
+            diff = (full - fast).abs().max().item()
+        if not torch.isfinite(fast).all() or diff > 0.03:
+            teacher_amp = dict(device_type='cuda', enabled=False)
+        print(f'teacher precision check: max diff {diff:.4f} -> teacher in '
+              f'{"full precision" if not teacher_amp.get("enabled", True) else str(half)}', flush=True)
     for p in list(teacher.parameters()) + list(arcface.parameters()):
         p.requires_grad_(False)
 
@@ -169,8 +191,9 @@ def main():
             target = store[t[k:k + 32].to(store.device)].to(dev).permute(0, 3, 1, 2).float() / 255
             src_emb = emb_all[s[k:k + 32].to(dev)]
             latent = F.normalize(src_emb @ emap, dim=1)
-            with torch.autocast(**amp):
+            with torch.autocast(**teacher_amp):
                 tea = teacher(target, latent).float()
+            with torch.autocast(**amp):
                 stu = ema(target, latent).float()
                 e_t = F.normalize(arcface(arc_input(tea)).float(), dim=1)
                 e_s = F.normalize(arcface(arc_input(stu)).float(), dim=1)
@@ -211,7 +234,7 @@ def main():
     while step < args.steps:
         student.train()
         target, latent, src_emb = batch(train_idx, args.batch, aug=True)
-        with torch.no_grad(), torch.autocast(**amp):
+        with torch.no_grad(), torch.autocast(**teacher_amp):
             tea = teacher(target, latent).float()
         with torch.autocast(**amp):
             stu = student(target, latent).float()
@@ -221,9 +244,11 @@ def main():
             idl = (1 - F.cosine_similarity(emb, src_emb)).mean()
             loss = args.w_l1 * l1 + args.w_lpips * lp + args.w_id * idl
         opt.zero_grad(set_to_none=True)
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(opt)
         torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
-        opt.step()
+        scaler.step(opt)
+        scaler.update()
         sched.step()
         with torch.no_grad():
             d = min(0.999, (1 + step) / (10 + step))

@@ -29,7 +29,16 @@ copy it should be treated the same way: personal use, not for sale.
 All of it was run end to end on a CPU with a handful of faces before release. Only the full-size
 GPU run is new.
 
-## Steps
+## Free route: Kaggle
+
+`kaggle_run.py` runs the whole job on Kaggle's free T4 GPU in 2–3 runs of up to 12 hours each. Each
+run picks up the prepared faces and the newest checkpoint from the runs before it, and leaves an
+exported, evaluated model plus a `status.json`. It uses float16 on the T4, after a start-up check
+that the teacher gives the same pictures in float16. Templates are in `kaggle/`; the step-by-step
+instructions are in `HERMES_PROMPT_KAGGLE.md`. Both runs were simulated end to end on a CPU:
+preparation, training, export, evaluation, and the second run resuming the first.
+
+## Paid route: vast.ai
 
 ### 1. Rent the machine (vast.ai)
 
