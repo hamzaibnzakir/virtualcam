@@ -96,14 +96,35 @@ SMOKE FAILED
       ]
     },
     {
+      "step": "camera-permission",
+      "error": "NotFoundError"
+    },
+    {
       "step": "camera-loopback",
       "installed": true,
       "running": true,
-      "listed": false
+      "listed": false,
+      "cameras": []
+    },
+    {
+      "step": "model-download",
+      "ok": true,
+      "seconds": 8
+    },
+    {
+      "step": "local-swap",
+      "models": true,
+      "aiState": "generating",
+      "provider": "cpu",
+      "swapped": true,
+      "live": true,
+      "meanFaceChange": 8,
+      "ms": 2292,
+      "hardware": "cpu-only"
     }
   ],
   "ok": false,
-  "error": "Error: the VirtualCam camera did not show the studio picture\n    at T6 (file:///D:/a/virtualcam/virtualcam/dist/studio.js:103:183862)"
+  "error": "the VirtualCam camera did not show the studio picture"
 }
 Quick switcher: [switcher] rows=5
 
