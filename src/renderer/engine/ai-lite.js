@@ -1,11 +1,15 @@
 // Lite engine: "wear" the face from a photo with no generative AI, so it runs on almost any PC.
 //
-//   1. Track 478 face points with MediaPipe (small, runs on the CPU), smoothed with a one-euro filter.
+//   1. Track 478 face points with MediaPipe (small, runs on the CPU). The face's shape is smoothed in
+//      the head's own frame, so the head's moves aren't delayed; brief tracking losses fade, not pop.
 //   2. Warp the photo's face onto yours with a fixed triangle mesh built once from the photo,
 //      leaving holes for your real eyes and mouth so blinks, speech and teeth stay yours.
+//      Your face points are first moved to the photo's face shape (aligned to your head pose, minus
+//      your expressions), and your camera picture is warped the same way, eyes and mouth included.
 //   3. In a WebGL shader: match the photo's colours to your camera in LAB space, take the room's
 //      shading from your camera (frequency separation), add back your skin highlights, and feather
-//      the edges. Triangles that turn away from the camera fade out instead of smearing.
+//      the edges. Triangles that turn away from the camera fade out instead of smearing. If you
+//      wear glasses, their rims stay on top of the photo's face.
 import { FaceLandmarker } from '@mediapipe/tasks-vision';
 import Delaunator from 'delaunator';
 import { output } from './state.js';
@@ -16,7 +20,59 @@ const FRESH_MS = 1000;
 //   detail:   how much of the camera's fine skin detail/highlights is added back
 //   blurDiv:  lighting blur radius = face width / blurDiv
 //   contrast: 0 = take the camera's colour contrast, 1 = keep the photo's
-export const liteTuning = { shading: 0.2, detail: 0.05, blurDiv: 10, contrast: 0.5 };
+//   feather:  soft edge at the face outline, as a share of face width
+//   holeFeather: soft edge around the eye holes, as a share of face width
+//   mouthFeather: soft edge around the mouth hole, as a share of face width
+//   eyeEdge:  photo opacity right at the eye opening (0 = fade to your eye, 1 = hard edge)
+//   glassesCam: 1 = keep the rims of your own glasses on top of the photo's face (when detected)
+//   spanCut:  1 = also cut triangles that join the upper and lower lid/lip (closed eyes/mouth in the photo)
+//   minCutoff, beta, dCutoff: one-euro smoothing of the face's shape in the head's own frame (Hz when
+//             still; extra Hz per eye distance/s of shape change; Hz for the speed estimate)
+//   turnLo, turnHi: a triangle fades out as its size falls from turnHi to turnLo of the photo's
+//                   (it is turning away from the camera)
+//   holdMs:   when tracking drops out, keep the last points this long while the face fades out
+//   fadeInMs, fadeOutMs: how long the face takes to fade in when found and out when lost
+//   depthSmooth: how quickly the tracked depth (used only to align the photo's shape in 3D) follows (0..1 per frame)
+//   shape:     0 = keep your face shape, 1 = the photo's face shape (outline, eye spacing, nose, mouth)
+//   shape3d:   1 = align the photo to your head in 3D (head turns stay turns), 0 = flat 2D alignment (tears when turned)
+//   shapeLips: how much the lips' outer edge takes the photo's shape (lips also move with the face as one piece)
+//   shapeMouth: the same for the mouth opening (inner lip edge); low keeps your own opening at rest
+//   shapeZone: skin within this share of the face width from the lips is eased from shapeLips to full shape
+//   shapeJaw:  1 = the photo's mouth opening is taken out of its shape (an open-mouthed photo doesn't stretch your chin)
+//   shapeEyes: 0 = your eyes keep their shape and only move/scale with the photo's eye corners, 1 = full reshape
+//   shapeRing: the warp fades out this far outside the face outline (share of the face radius)
+//   shapeRest: seconds of averaging for your resting face shape (expressions are changes from it);
+//              0 = no averaging (every frame is taken as rest, which also flattens expressions)
+export const liteTuning = {
+  shading: 0.15,
+  detail: 0.03,
+  blurDiv: 7,
+  contrast: 0.5,
+  feather: 0.03,
+  holeFeather: 0.01,
+  mouthFeather: 0.01,
+  eyeEdge: 0.75,
+  spanCut: 1,
+  glassesCam: 1,
+  minCutoff: 2,
+  beta: 12,
+  dCutoff: 1,
+  turnLo: 0.05,
+  turnHi: 0.35,
+  holdMs: 250,
+  fadeInMs: 150,
+  fadeOutMs: 200,
+  shape: 1,
+  shape3d: 1,
+  shapeLips: 0.5,
+  shapeMouth: 0,
+  shapeZone: 0.1,
+  shapeJaw: 1,
+  shapeEyes: 0,
+  shapeRing: 0.35,
+  shapeRest: 5,
+  depthSmooth: 0.5,
+};
 const TUNE = liteTuning;
 const MESH_POINTS = 468; // 0..467 are the face; 468..477 are the irises
 const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
@@ -24,14 +80,38 @@ const RIGHT_EYE = [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 14
 const LEFT_EYE = [263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249];
 const INNER_LIPS = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95];
 const HOLES = [RIGHT_EYE, LEFT_EYE, INNER_LIPS];
+// Upper and lower lids/lips (two rings each, corners left out), per hole.
+const HOLE_SIDES = [
+  [[246, 161, 160, 159, 158, 157, 173, 247, 30, 29, 27, 28, 56, 190], [7, 163, 144, 145, 153, 154, 155, 25, 110, 24, 23, 22, 26, 112]],
+  [[466, 388, 387, 386, 385, 384, 398, 467, 260, 259, 257, 258, 286, 414], [249, 390, 373, 374, 380, 381, 382, 255, 339, 254, 253, 252, 256, 341]],
+  [
+    [185, 40, 39, 37, 0, 267, 269, 270, 409, 184, 74, 73, 72, 11, 302, 303, 304, 408, 183, 42, 41, 38, 12, 268, 271, 272, 407, 191, 80, 81, 82, 13, 312, 311, 310, 415],
+    [146, 91, 181, 84, 17, 314, 405, 321, 375, 77, 90, 180, 85, 16, 315, 404, 320, 307, 96, 89, 179, 86, 15, 316, 403, 319, 325, 95, 88, 178, 87, 14, 317, 402, 318, 324],
+  ],
+];
+// Face shape: points that don't move with expression (forehead, temples, nose, eye corners) fix the head pose.
+const SHAPE_FIT = [10, 151, 9, 8, 168, 6, 197, 195, 5, 4, 1, 98, 327, 33, 133, 362, 263, 127, 356, 234, 454, 162, 389, 21, 251, 54, 284, 103, 332, 67, 297, 109, 338];
+const OUTER_LIPS = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185];
+const EYE_CORNERS = [[33, 133], [263, 362]]; // outer, inner corner of RIGHT_EYE, LEFT_EYE
+// The lower lip (all four lip rings) and the mouth corners: they go with the jaw when the mouth opens.
+const LOWER_LIP = [146, 91, 181, 84, 17, 314, 405, 321, 375, 77, 90, 180, 85, 16, 315, 404, 320, 307, 96, 89, 179, 86, 15, 316, 403, 319, 325, 95, 88, 178, 87, 14, 317, 402, 318, 324];
+const MOUTH_CORNERS = [61, 291, 76, 306, 62, 292, 78, 308];
+// Folds in the camera warp: first smooth the moves of a folded triangle's corners (FOLD_SMOOTH_ROUNDS),
+// then shrink them (each round they keep FOLD_EASE of their move) until FOLD_ROUNDS.
+const FOLD_SMOOTH_ROUNDS = 8;
+const FOLD_EASE = 0.75;
+const FOLD_ROUNDS = 20;
 
 // ---------- small geometry helpers ----------
 
 function inPolygon(x, y, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
-    const [xi, yi] = poly[i];
-    const [xj, yj] = poly[j];
+    // Indexing, not destructuring: this runs for every pixel of the colour sample, and is ~10x faster.
+    const xi = poly[i][0];
+    const yi = poly[i][1];
+    const xj = poly[j][0];
+    const yj = poly[j][1];
     if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
@@ -105,20 +185,150 @@ function labStats(data, width, height, poly) {
   return { mean, std };
 }
 
-// ---------- one-euro filter: steady when still, instant when you move ----------
+// ---------- glasses ----------
+// Glasses show as thin dark lines: the "black top-hat" (grey closing minus the image) picks out
+// dark structures thinner than the filter, like rims, but not broad shading.
 
-class OneEuro {
-  constructor({ minCutoff = 1.2, beta = 0.06, dCutoff = 1.0 } = {}) {
-    this.minCutoff = minCutoff;
-    this.beta = beta;
-    this.dCutoff = dCutoff;
-    this.x = null;
-    this.dx = null;
-    this.t = 0;
+// Max (dilate) or min (erode) over a (2r+1)² square, separable, on a w×h Float32Array.
+function rankFilter(src, w, h, r, dilate) {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let v = src[y * w + x];
+      for (let k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k += 1) {
+        const s = src[y * w + k];
+        if (dilate ? s > v : s < v) v = s;
+      }
+      tmp[y * w + x] = v;
+    }
+  }
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let v = tmp[y * w + x];
+      for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k += 1) {
+        const s = tmp[k * w + x];
+        if (dilate ? s > v : s < v) v = s;
+      }
+      out[y * w + x] = v;
+    }
+  }
+  return out;
+}
+
+// Glasses score (see glassesScore) where glasses start to count, and where they fully count.
+const GLASSES_LO = 10;
+const GLASSES_HI = 14;
+
+const closing = (src, w, h, r) => rankFilter(rankFilter(src, w, h, r, true), w, h, r, false);
+
+function centroid(ids, pt) {
+  let x = 0;
+  let y = 0;
+  for (const i of ids) {
+    const p = pt(i);
+    x += p[0];
+    y += p[1];
+  }
+  return [x / ids.length, y / ids.length];
+}
+
+// The eyes' frame: centres, eye distance, and unit axes along and across the eye line.
+function eyeFrame(pt) {
+  const r = centroid(RIGHT_EYE, pt);
+  const l = centroid(LEFT_EYE, pt);
+  const ed = Math.hypot(l[0] - r[0], l[1] - r[1]) || 1;
+  const ax = [(l[0] - r[0]) / ed, (l[1] - r[1]) / ed];
+  return { r, l, ed, ax, up: [ax[1], -ax[0]], mid: [(r[0] + l[0]) / 2, (r[1] + l[1]) / 2] };
+}
+
+// How strongly a dark line crosses the nose bridge (glasses), minus the forehead's own fine texture
+// (wrinkles). Reads an RGBA patch `data` (patchW wide) whose top-left is (ox, oy) in image pixels.
+function glassesScore(data, patchW, patchH, ox, oy, eyes) {
+  const { ed, ax, up, mid } = eyes;
+  const r = Math.max(1, Math.round(0.06 * ed));
+  const L = new Float32Array(patchW * patchH);
+  for (let i = 0; i < patchW * patchH; i += 1) L[i] = (0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]) / 2.55;
+  const close = closing(L, patchW, patchH, r);
+  // s: along the eye line, t: up the face (both in eye distances from the eyes' midpoint).
+  const hat = (s, t) => {
+    const x = Math.round(mid[0] + (s * ax[0] + t * up[0]) * ed - ox);
+    const y = Math.round(mid[1] + (s * ax[1] + t * up[1]) * ed - oy);
+    if (x < 0 || y < 0 || x >= patchW || y >= patchH) return 0;
+    return close[y * patchW + x] - L[y * patchW + x];
+  };
+  const step = 1 / ed;
+  let bridge = 0;
+  for (let t = -0.15; t <= 0.35; t += step) {
+    let sum = 0;
+    let n = 0;
+    for (let s = -0.12; s <= 0.12; s += step) {
+      sum += hat(s, t);
+      n += 1;
+    }
+    bridge = Math.max(bridge, sum / Math.max(1, n));
+  }
+  let tex = 0;
+  let n = 0;
+  for (let t = 0.6; t <= 0.9; t += step * 2) {
+    for (let s = -0.3; s <= 0.3; s += step * 2) {
+      tex += hat(s, t);
+      n += 1;
+    }
+  }
+  return bridge - tex / Math.max(1, n);
+}
+
+// Pixel box (clamped) around the eye midpoint: `side` eye distances left/right, `above`/`below` up/down.
+function glassesBox(eyes, width, height, side, above, below) {
+  const { ed, mid } = eyes;
+  const x0 = Math.max(0, Math.floor(mid[0] - side * ed));
+  const y0 = Math.max(0, Math.floor(mid[1] - above * ed));
+  const x1 = Math.min(width, Math.ceil(mid[0] + side * ed));
+  const y1 = Math.min(height, Math.ceil(mid[1] + below * ed));
+  return { x0, y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+}
+
+// Glasses score of the face in a canvas (see glassesScore). Big faces are checked at reduced size
+// (eye distance about 100 px) so it stays a few milliseconds.
+let glassesCtx = null;
+function detectGlasses(canvas, width, height, eyes) {
+  const { x0, y0, w, h } = glassesBox(eyes, width, height, 0.45, 1.05, 0.3);
+  const k = Math.min(1, 100 / eyes.ed);
+  const pw = Math.max(1, Math.round(w * k));
+  const ph = Math.max(1, Math.round(h * k));
+  if (!glassesCtx) glassesCtx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  if (glassesCtx.canvas.width < pw) glassesCtx.canvas.width = pw;
+  if (glassesCtx.canvas.height < ph) glassesCtx.canvas.height = ph;
+  glassesCtx.drawImage(canvas, x0, y0, w, h, 0, 0, pw, ph);
+  const patch = glassesCtx.getImageData(0, 0, pw, ph).data;
+  const small = { ...eyes, ed: eyes.ed * k, mid: [(eyes.mid[0] - x0) * k, (eyes.mid[1] - y0) * k] };
+  return glassesScore(patch, pw, ph, 0, 0, small);
+}
+
+// ---------- smoothing: steady when still, no added delay when the head moves ----------
+// MediaPipe already smooths its points a little in video mode, and filtering each point on its own
+// adds more delay whenever the head moves. So each frame's points are split into the head's move
+// (position, roll and size: a similarity fit to a template, made steady by all 468 points together)
+// and the face's shape in the head's own frame. Only the shape is smoothed, with a one-euro filter per
+// point (steady when still, quick when the shape changes, as when you talk or turn); the head's move
+// passes straight through. Shape speeds are in eye distances per second, so near and far faces match.
+
+function eyeDistance(p) {
+  const rx = (p[33 * 2] + p[133 * 2]) / 2;
+  const ry = (p[33 * 2 + 1] + p[133 * 2 + 1]) / 2;
+  const lx = (p[362 * 2] + p[263 * 2]) / 2;
+  const ly = (p[362 * 2 + 1] + p[263 * 2 + 1]) / 2;
+  return Math.hypot(lx - rx, ly - ry);
+}
+
+class ShapeFilter {
+  constructor() {
+    this.tpl = null;
   }
 
   reset() {
-    this.x = null;
+    this.tpl = null;
   }
 
   static alpha(cutoff, dt) {
@@ -127,22 +337,110 @@ class OneEuro {
   }
 
   filter(values, tMs) {
-    if (!this.x || this.x.length !== values.length) {
-      this.x = Float32Array.from(values);
-      this.dx = new Float32Array(values.length);
-      this.t = tMs;
-      return this.x;
+    const len = values.length;
+    const n = len / 2;
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < len; i += 2) {
+      cx += values[i];
+      cy += values[i + 1];
     }
-    const dt = Math.max(1e-3, (tMs - this.t) / 1000);
+    cx /= n;
+    cy /= n;
+    const first = !this.tpl || this.tpl.length !== len;
+    if (first) {
+      // The template: this first frame, centred, with an eye distance of 1.
+      const eye = eyeDistance(values) || 1;
+      this.tpl = new Float64Array(len);
+      this.tplNorm = 0;
+      for (let i = 0; i < len; i += 2) {
+        this.tpl[i] = (values[i] - cx) / eye;
+        this.tpl[i + 1] = (values[i + 1] - cy) / eye;
+        this.tplNorm += this.tpl[i] * this.tpl[i] + this.tpl[i + 1] * this.tpl[i + 1];
+      }
+      this.shape = new Float64Array(len);
+      this.x = new Float64Array(len);
+      this.dx = new Float64Array(len);
+      this.out = new Float32Array(len);
+    }
+    // The head's move: points - centre = [a -b; b a] * template (least squares).
+    let sa = 0;
+    let sb = 0;
+    for (let i = 0; i < len; i += 2) {
+      const qx = this.tpl[i];
+      const qy = this.tpl[i + 1];
+      const px = values[i] - cx;
+      const py = values[i + 1] - cy;
+      sa += qx * px + qy * py;
+      sb += qx * py - qy * px;
+    }
+    const a = sa / this.tplNorm;
+    const b = sb / this.tplNorm;
+    const s2 = a * a + b * b || 1;
+    // The face's shape in the head's frame.
+    const shape = this.shape;
+    for (let i = 0; i < len; i += 2) {
+      const px = values[i] - cx;
+      const py = values[i + 1] - cy;
+      shape[i] = (a * px + b * py) / s2;
+      shape[i + 1] = (-b * px + a * py) / s2;
+    }
+    if (first) {
+      this.x.set(shape);
+    } else {
+      const dt = Math.max(1e-3, (tMs - this.t) / 1000);
+      const ad = ShapeFilter.alpha(TUNE.dCutoff, dt);
+      for (let i = 0; i < len; i += 2) {
+        this.dx[i] = ad * ((shape[i] - this.x[i]) / dt) + (1 - ad) * this.dx[i];
+        this.dx[i + 1] = ad * ((shape[i + 1] - this.x[i + 1]) / dt) + (1 - ad) * this.dx[i + 1];
+        const speed = Math.sqrt(this.dx[i] * this.dx[i] + this.dx[i + 1] * this.dx[i + 1]);
+        const al = ShapeFilter.alpha(TUNE.minCutoff + TUNE.beta * speed, dt);
+        this.x[i] = al * shape[i] + (1 - al) * this.x[i];
+        this.x[i + 1] = al * shape[i + 1] + (1 - al) * this.x[i + 1];
+      }
+    }
     this.t = tMs;
-    const ad = OneEuro.alpha(this.dCutoff, dt);
-    for (let i = 0; i < values.length; i += 1) {
-      const d = (values[i] - this.x[i]) / dt;
-      this.dx[i] = ad * d + (1 - ad) * this.dx[i];
-      const a = OneEuro.alpha(this.minCutoff + this.beta * Math.abs(this.dx[i]), dt);
-      this.x[i] = a * values[i] + (1 - a) * this.x[i];
+    // Smoothed shape, placed by this frame's head move.
+    for (let i = 0; i < len; i += 2) {
+      this.out[i] = cx + a * this.x[i] - b * this.x[i + 1];
+      this.out[i + 1] = cy + b * this.x[i] + a * this.x[i + 1];
     }
-    return this.x;
+    return this.out;
+  }
+}
+
+// The points to draw each frame: smoothed while tracked; when tracking drops out, the last good
+// points are kept for a moment while the face fades out, and a face that (re)appears fades in.
+export class PointSmoother {
+  constructor() {
+    this.shapeFilter = new ShapeFilter();
+    this.reset();
+  }
+
+  reset() {
+    this.shapeFilter.reset();
+    this.points = null;
+    this.strength = 0; // face opacity, 0..1
+    this.seenAt = -Infinity;
+    this.lastT = null;
+  }
+
+  // raw: this frame's tracked points (px) or null when no face was found; t: frame time (ms).
+  update(raw, t) {
+    const dt = this.lastT === null ? 1000 / 30 : Math.min(100, Math.max(0, t - this.lastT));
+    this.lastT = t;
+    if (raw) {
+      this.points = this.shapeFilter.filter(raw, t);
+      this.seenAt = t;
+      this.strength = TUNE.fadeInMs > 0 ? Math.min(1, this.strength + dt / TUNE.fadeInMs) : 1;
+    } else if (this.points && t - this.seenAt < TUNE.holdMs) {
+      this.strength = TUNE.fadeOutMs > 0 ? Math.max(0, this.strength - dt / TUNE.fadeOutMs) : 0;
+    } else {
+      this.shapeFilter.reset();
+      this.points = null;
+      this.strength = 0;
+    }
+    return this.points;
   }
 }
 
@@ -163,15 +461,30 @@ in vec2 vUV;
 out vec4 outColor;
 void main() { outColor = vec4(texture(uFrame, vUV).rgb, 1.0); }`;
 
+// Your camera picture drawn through the face mesh: sampled where your face points are, drawn where the
+// reshaped points are, so your real eyes and mouth move with the new face shape.
+const VERTEX_WARP = `#version 300 es
+in vec2 aPos;     // reshaped position in pixels
+in vec2 aUV;      // where this point is in the camera picture (0..1)
+uniform vec2 uViewport;
+out vec2 vUV;
+void main() {
+  vUV = aUV;
+  gl_Position = vec4(aPos.x / uViewport.x * 2.0 - 1.0, 1.0 - aPos.y / uViewport.y * 2.0, 0.0, 1.0);
+}`;
+
 const VERTEX_FACE = `#version 300 es
 in vec2 aPos;     // target position in pixels
 in vec2 aSrcUV;   // where this point is in the photo (0..1)
+in vec2 aFrameUV; // where this point is in the camera picture (0..1), before reshaping
 in float aAlpha;  // edge feather x turned-away fade
 uniform vec2 uViewport;
 out vec2 vSrcUV;
+out vec2 vFrameUV;
 out float vAlpha;
 void main() {
   vSrcUV = aSrcUV;
+  vFrameUV = aFrameUV;
   vAlpha = aAlpha;
   gl_Position = vec4(aPos.x / uViewport.x * 2.0 - 1.0, 1.0 - aPos.y / uViewport.y * 2.0, 0.0, 1.0);
 }`;
@@ -183,7 +496,10 @@ uniform sampler2D uFrame;
 uniform vec2 uViewport;
 uniform vec3 uSrcMean, uSrcStd, uDstMean, uDstStd;
 uniform float uSrcLod, uFrameLod, uShading, uDetail, uStrength;
+uniform float uCamGlasses, uGlassEd, uGlassLod;
+uniform vec2 uGlassR, uGlassL, uGlassAx; // your eye centres and eye line, in output pixels
 in vec2 vSrcUV;
+in vec2 vFrameUV;
 in float vAlpha;
 out vec4 outColor;
 
@@ -217,15 +533,42 @@ vec3 transfer(vec3 c) {
   return lab2rgb(lab);
 }
 
+// Where glasses sit around one eye (less far up than down, so brows stay out), 0..1.
+float glassZone(vec2 p, vec2 c) {
+  vec2 d = p - c;
+  float v = dot(d, vec2(uGlassAx.y, -uGlassAx.x));
+  vec2 q = vec2(dot(d, uGlassAx) / 0.6, v / (v > 0.0 ? 0.4 : 0.48)) / uGlassEd;
+  return 1.0 - smoothstep(0.8, 1.0, length(q));
+}
+
+// Both eyes, but only low over the nose bridge (the frown lines above it stay out).
+float glassesArea(vec2 p) {
+  vec2 d = (p - 0.5 * (uGlassR + uGlassL)) / uGlassEd;
+  float across = abs(dot(d, uGlassAx));
+  float up = dot(d, vec2(uGlassAx.y, -uGlassAx.x));
+  float bridge = (1.0 - smoothstep(0.15, 0.3, across)) * smoothstep(0.1, 0.18, up);
+  return max(glassZone(p, uGlassR), glassZone(p, uGlassL)) * (1.0 - bridge);
+}
+
 void main() {
-  vec2 fuv = vec2(gl_FragCoord.x / uViewport.x, 1.0 - gl_FragCoord.y / uViewport.y);
+  vec2 fuv = vFrameUV; // your camera at this spot of the (reshaped) face
   vec3 src = transfer(texture(uSrc, vSrcUV).rgb);
   vec3 srcLow = transfer(textureLod(uSrc, vSrcUV, uSrcLod).rgb);
   vec3 frame = texture(uFrame, fuv).rgb;
   vec3 frameLow = textureLod(uFrame, fuv, uFrameLod).rgb;
   // Photo detail + the room's shading on your face + your live skin highlights.
   vec3 col = src + (frameLow - srcLow) * uShading + (frame - frameLow) * uDetail;
-  outColor = vec4(clamp(col, 0.0, 1.0), vAlpha * uStrength);
+  float alpha = vAlpha;
+  if (uCamGlasses > 0.0) {
+    // Your glasses rims (thin dark lines in the glasses area) stay on top.
+    vec2 fpx = vFrameUV * uViewport; // where this spot is on your real face
+    float z = glassesArea(fpx);
+    if (z > 0.0) {
+      float dark = dot(textureLod(uFrame, fuv, uGlassLod).rgb - frame, vec3(0.299, 0.587, 0.114));
+      alpha *= 1.0 - uCamGlasses * z * smoothstep(0.07, 0.15, dark);
+    }
+  }
+  outColor = vec4(clamp(col, 0.0, 1.0), alpha * uStrength);
 }`;
 
 function compile(gl, type, source) {
@@ -275,13 +618,19 @@ export class LiteFaceAI {
     this.appliedRef = null;
     this.source = null; // { width, height, points: Float32Array (px), tris: Uint16Array, feather, stats }
     this.dstStats = null;
+    this.camGlasses = 0;
     this.frame = 0;
     this.lastTs = 0;
     this.lastResultAt = 0;
     this.faceFound = false;
     this.stats = { ms: 0, fps: 0 };
     this.times = [];
-    this.smoother = new OneEuro();
+    this.smoother = new PointSmoother();
+    this.raw = new Float32Array(MESH_POINTS * 2); // this frame's tracked points before smoothing (px)
+    this.rawZ = new Float32Array(MESH_POINTS); // this frame's tracked depths (px)
+    this.depth = new Float32Array(MESH_POINTS); // smoothed depths, for the face shape morph
+    this.depthFor = null;
+    this.points = null; // the points drawn this frame
 
     this.input = document.createElement('canvas');
     this.input.width = output.width;
@@ -397,6 +746,9 @@ export class LiteFaceAI {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
     this.faceBuffer = gl.createBuffer();
+    this.warpProgram = program(gl, VERTEX_WARP, FRAGMENT_QUAD);
+    this.warpBuffer = gl.createBuffer();
+    this.warpIndex = gl.createBuffer();
     this.frameTex = makeTexture(gl);
     this.srcTex = makeTexture(gl);
     this.loc = {
@@ -404,9 +756,14 @@ export class LiteFaceAI {
       qFrame: gl.getUniformLocation(this.quadProgram, 'uFrame'),
       fPos: gl.getAttribLocation(this.faceProgram, 'aPos'),
       fSrcUV: gl.getAttribLocation(this.faceProgram, 'aSrcUV'),
+      fFrameUV: gl.getAttribLocation(this.faceProgram, 'aFrameUV'),
       fAlpha: gl.getAttribLocation(this.faceProgram, 'aAlpha'),
+      wPos: gl.getAttribLocation(this.warpProgram, 'aPos'),
+      wUV: gl.getAttribLocation(this.warpProgram, 'aUV'),
+      wFrame: gl.getUniformLocation(this.warpProgram, 'uFrame'),
+      wViewport: gl.getUniformLocation(this.warpProgram, 'uViewport'),
     };
-    for (const name of ['uSrc', 'uFrame', 'uViewport', 'uSrcMean', 'uSrcStd', 'uDstMean', 'uDstStd', 'uSrcLod', 'uFrameLod', 'uShading', 'uDetail', 'uStrength']) {
+    for (const name of ['uSrc', 'uFrame', 'uViewport', 'uSrcMean', 'uSrcStd', 'uDstMean', 'uDstStd', 'uSrcLod', 'uFrameLod', 'uShading', 'uDetail', 'uStrength', 'uCamGlasses', 'uGlassEd', 'uGlassLod', 'uGlassR', 'uGlassL', 'uGlassAx']) {
       this.loc[name] = gl.getUniformLocation(this.faceProgram, name);
     }
   }
@@ -439,18 +796,35 @@ export class LiteFaceAI {
       result = this.imageLm.detect(padded);
       if (!result.faceLandmarks.length) return null;
       const lm = result.faceLandmarks[0];
-      result = { faceLandmarks: [lm.map((p) => ({ x: (p.x * padded.width - pad) / width, y: (p.y * padded.height - pad) / height }))] };
+      result = { faceLandmarks: [lm.map((p) => ({ x: (p.x * padded.width - pad) / width, y: (p.y * padded.height - pad) / height, z: (p.z * padded.width) / width }))] };
     }
 
     const lm = result.faceLandmarks[0];
     const points = new Float32Array(MESH_POINTS * 2);
+    const points3 = new Float32Array(MESH_POINTS * 3); // with depth, for the face shape morph
     for (let i = 0; i < MESH_POINTS; i += 1) {
       points[i * 2] = lm[i].x * width;
       points[i * 2 + 1] = lm[i].y * height;
+      points3[i * 3] = points[i * 2];
+      points3[i * 3 + 1] = points[i * 2 + 1];
+      points3[i * 3 + 2] = (lm[i].z || 0) * width;
     }
     const pt = (i) => [points[i * 2], points[i * 2 + 1]];
     const oval = FACE_OVAL.map(pt);
     const holes = HOLES.map((ring) => ring.map(pt));
+
+    // A triangle joining the upper and lower lid/lip would stretch across your eye or mouth
+    // when it opens wider than the photo's (closed or narrow in the photo).
+    const side = new Int8Array(MESH_POINTS * HOLES.length);
+    HOLE_SIDES.forEach(([upper, lower], k) => {
+      for (const v of upper) side[k * MESH_POINTS + v] = 1;
+      for (const v of lower) side[k * MESH_POINTS + v] = 2;
+    });
+    const spansHole = (a, b, c) =>
+      HOLES.some((_, k) => {
+        const m = side[k * MESH_POINTS + a] | side[k * MESH_POINTS + b] | side[k * MESH_POINTS + c];
+        return m === 3;
+      });
 
     // Fixed topology from the photo: never re-triangulated, so the mesh can't flicker.
     const del = new Delaunator(points);
@@ -461,6 +835,7 @@ export class LiteFaceAI {
       const cy = (points[a * 2 + 1] + points[b * 2 + 1] + points[c * 2 + 1]) / 3;
       if (!inPolygon(cx, cy, oval)) continue; // outside the face
       if (holes.some((h) => inPolygon(cx, cy, h))) continue; // your real eyes and mouth show through
+      if (TUNE.spanCut && spansHole(a, b, c)) continue;
       tris.push(a, b, c);
     }
 
@@ -470,12 +845,63 @@ export class LiteFaceAI {
     for (let i = 0; i < MESH_POINTS; i += 1) {
       const [x, y] = pt(i);
       const edge = inPolygon(x, y, oval) ? distToPolygonEdge(x, y, oval) / faceWidth : 0;
-      let a = smoothstep(0.0, 0.09, edge);
-      for (const h of holes) a = Math.min(a, smoothstep(0.0, 0.035, distToPolygonEdge(x, y, h) / faceWidth));
+      let a = smoothstep(0.0, Math.max(1e-4, TUNE.feather), edge);
+      holes.forEach((h, k) => {
+        const mouth = k === 2;
+        const d = distToPolygonEdge(x, y, h) / faceWidth;
+        const w = Math.max(1e-4, mouth ? TUNE.mouthFeather : TUNE.holeFeather);
+        a = Math.min(a, mouth ? smoothstep(0.0, w, d) : TUNE.eyeEdge + (1 - TUNE.eyeEdge) * smoothstep(0.0, w, d));
+      });
       feather[i] = a;
     }
     const srcAreas = new Float32Array(tris.length / 3);
     for (let t = 0; t < tris.length; t += 3) srcAreas[t / 3] = triArea(points, tris[t], tris[t + 1], tris[t + 2]);
+
+    // Face shape: which points are lips (they move as one piece), and a mesh for warping your camera
+    // picture: every face point (eyes and mouth too) plus a fixed ring outside the outline, so the
+    // reshape stretches the hair and neck smoothly instead of tearing at the edge of the face.
+    // lips[i]: 0 = not a lip point, else 1 + where it sits across the lip (0 = mouth opening, 1 = outer edge).
+    const lips = new Float32Array(MESH_POINTS);
+    const lipRing = OUTER_LIPS.map(pt);
+    const mouthRing = INNER_LIPS.map(pt);
+    for (let i = 0; i < MESH_POINTS; i += 1) {
+      const [x, y] = pt(i);
+      if (!OUTER_LIPS.includes(i) && !inPolygon(x, y, lipRing)) continue;
+      const toMouth = INNER_LIPS.includes(i) ? 0 : distToPolygonEdge(x, y, mouthRing);
+      const toEdge = OUTER_LIPS.includes(i) ? 0 : distToPolygonEdge(x, y, lipRing);
+      lips[i] = 1 + toMouth / (toMouth + toEdge || 1);
+    }
+    // nearMouth[i]: distance from the lips as a share of the face width (smiles move the skin around them).
+    const nearMouth = new Float32Array(MESH_POINTS);
+    for (let i = 0; i < MESH_POINTS; i += 1) if (!lips[i]) nearMouth[i] = distToPolygonEdge(...pt(i), lipRing) / faceWidth;
+    // jaw[i]: how far each point goes down when the mouth opens (lower lip and chin 1, upper lip and above 0).
+    const jaw = new Float32Array(MESH_POINTS);
+    const downX = points[2 * 2] - points[168 * 2];
+    const downY = points[2 * 2 + 1] - points[168 * 2 + 1];
+    const level = (i) => (points[i * 2] - points[168 * 2]) * downX + (points[i * 2 + 1] - points[168 * 2 + 1]) * downY;
+    const cornerLevel = (level(61) + level(291)) / 2;
+    for (let i = 0; i < MESH_POINTS; i += 1) {
+      if (lips[i]) jaw[i] = LOWER_LIP.includes(i) ? 1 : MOUTH_CORNERS.includes(i) ? 0.5 : 0;
+      else jaw[i] = smoothstep(cornerLevel, level(17), level(i));
+    }
+    const warpPts = new Float32Array((MESH_POINTS + FACE_OVAL.length) * 2);
+    warpPts.set(points);
+    ringAround(points, warpPts, MESH_POINTS * 2);
+    const warpTris = Uint16Array.from(new Delaunator(warpPts).triangles);
+    // Each face point's neighbours in that mesh (to smooth out folds): warpNbr[warpNbrAt[i] .. warpNbrAt[i + 1]).
+    const nbrSets = Array.from({ length: MESH_POINTS }, () => new Set());
+    for (let t = 0; t < warpTris.length; t += 3) {
+      for (let k = 0; k < 3; k += 1) {
+        const a = warpTris[t + k];
+        if (a < MESH_POINTS) {
+          nbrSets[a].add(warpTris[t + ((k + 1) % 3)]);
+          nbrSets[a].add(warpTris[t + ((k + 2) % 3)]);
+        }
+      }
+    }
+    const warpNbrAt = new Int32Array(MESH_POINTS + 1);
+    for (let i = 0; i < MESH_POINTS; i += 1) warpNbrAt[i + 1] = warpNbrAt[i] + nbrSets[i].size;
+    const warpNbr = Int32Array.from(nbrSets.flatMap((s) => [...s]));
 
     const stats = labStats(ctx.getImageData(0, 0, width, height).data, width, height, oval) || {
       mean: [60, 10, 15],
@@ -486,16 +912,20 @@ export class LiteFaceAI {
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
     gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.warpIndex);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, warpTris, gl.STATIC_DRAW);
 
     this.smoother.reset();
     this.dstStats = null;
-    return { width, height, points, tris: Uint16Array.from(tris), feather, srcAreas, stats, faceWidth };
+    return { width, height, points, points3, lips, nearMouth, jaw, warpTris, warpNbr, warpNbrAt, warpCount: warpTris.length, tris: Uint16Array.from(tris), feather, srcAreas, stats, faceWidth };
   }
 
-  // Called by the compositor every frame.
-  tick(drawSource) {
+  // Called by the compositor every frame. frameTime (ms) is when the frame was captured; it defaults
+  // to now (the benchmark passes simulated 30 fps camera timestamps).
+  tick(drawSource, frameTime) {
     if (this.state !== 'generating' || !this.ready || !this.source) return;
     const started = performance.now();
+    const t = frameTime ?? started;
     if (this.input.width !== output.width || this.input.height !== output.height) {
       // Picture shape changed: follow it and restart smoothing (all points just moved).
       this.input.width = output.width;
@@ -506,7 +936,7 @@ export class LiteFaceAI {
       this.dstStats = null;
     }
     drawSource(this.inputCtx, output.width, output.height);
-    const ts = Math.max(this.lastTs + 1, Math.floor(started));
+    const ts = Math.max(this.lastTs + 1, Math.floor(t));
     this.lastTs = ts;
     let landmarks = null;
     try {
@@ -518,20 +948,28 @@ export class LiteFaceAI {
       return;
     }
 
-    let points = null;
+    const raw = this.raw;
     if (landmarks) {
-      const raw = new Float32Array(MESH_POINTS * 2);
       for (let i = 0; i < MESH_POINTS; i += 1) {
         raw[i * 2] = landmarks[i].x * output.width;
         raw[i * 2 + 1] = landmarks[i].y * output.height;
+        this.rawZ[i] = (landmarks[i].z || 0) * output.width;
       }
-      points = this.smoother.filter(raw, started);
-      if (this.frame % 4 === 0 || !this.dstStats) this.updateDstStats(points);
-    } else {
-      this.smoother.reset();
     }
-    this.faceFound = Boolean(points);
-    this.render(points);
+    // While tracking is lost for a moment, the last good points stay (fading out).
+    const points = this.smoother.update(landmarks ? raw : null, t);
+    // Depth only aligns the photo's shape to your head in 3D; it's kept apart from the 2D smoother
+    // (which fits the head move on x,y pairs) and lightly smoothed, restarting with the smoother.
+    if (points && landmarks) {
+      const restart = this.depthFor !== points;
+      this.depthFor = points;
+      const k = restart ? 1 : TUNE.depthSmooth;
+      for (let i = 0; i < MESH_POINTS; i += 1) this.depth[i] += (this.rawZ[i] - this.depth[i]) * k;
+    }
+    if (landmarks && (this.frame % 4 === 0 || !this.dstStats)) this.updateDstStats(points);
+    this.points = points;
+    this.faceFound = Boolean(landmarks);
+    this.render(points, this.smoother.strength);
     this.frame += 1;
 
     const now = performance.now();
@@ -556,10 +994,18 @@ export class LiteFaceAI {
     const data = this.smallCtx.getImageData(0, 0, this.small.width, this.small.height).data;
     const oval = FACE_OVAL.map((i) => [points[i * 2] * sx, points[i * 2 + 1] * sy]);
     const stats = labStats(data, this.small.width, this.small.height, oval);
+    if (!TUNE.glassesCam) this.camGlasses = 0;
+    else if (!this.dstStats || this.frame % 16 === 0) {
+      // Your own glasses (checked from the camera picture about twice a second, smoothed so it
+      // doesn't flicker).
+      this.camGlassesScore = detectGlasses(this.input, output.width, output.height, eyeFrame((i) => [points[i * 2], points[i * 2 + 1]]));
+      const g = smoothstep(GLASSES_LO, GLASSES_HI, this.camGlassesScore);
+      this.camGlasses = this.dstStats ? this.camGlasses * 0.5 + g * 0.5 : g;
+    }
     if (stats) this.dstStats = stats;
   }
 
-  render(points) {
+  render(points, strength = 1) {
     const gl = this.gl;
     gl.viewport(0, 0, output.width, output.height);
     gl.disable(gl.BLEND);
@@ -577,30 +1023,65 @@ export class LiteFaceAI {
     gl.vertexAttribPointer(this.loc.qPos, 2, gl.FLOAT, false, 0, 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disableVertexAttribArray(this.loc.qPos);
-    if (!points || !this.dstStats) return;
+    if (!points || !this.dstStats || strength <= 0) return;
+
+    // Your face reshaped to the photo's proportions: your camera picture (real eyes and mouth included)
+    // is warped to the new shape first, so the photo's face below lines up with it.
+    const src = this.source;
+    let shaped = TUNE.shape > 0 ? this.reshape(points) : points;
+    if (shaped !== points && strength < 1) {
+      // While the face fades in or out, the new shape eases in and out with it (no popping).
+      const eased = this.eased || (this.eased = new Float32Array(points.length));
+      for (let i = 0; i < points.length; i += 1) eased[i] = points[i] + (shaped[i] - points[i]) * strength;
+      shaped = eased;
+    }
+    if (shaped !== points) this.drawWarp(points, shaped);
 
     // Then the photo's face, warped onto yours.
-    const src = this.source;
     const tris = src.tris;
     const triCount = tris.length / 3;
-    const ovalTarget = FACE_OVAL.map((i) => points[i * 2]);
-    const targetWidth = Math.max(...ovalTarget) - Math.min(...ovalTarget);
-    const scale2 = (targetWidth / src.faceWidth) ** 2;
-    const verts = new Float32Array(triCount * 3 * 5);
-    let o = 0;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minSX = Infinity;
+    let maxSX = -Infinity;
+    for (let k = 0; k < FACE_OVAL.length; k += 1) {
+      const x = points[FACE_OVAL[k] * 2];
+      const sx = shaped[FACE_OVAL[k] * 2];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (sx < minSX) minSX = sx;
+      if (sx > maxSX) maxSX = sx;
+    }
+    const targetWidth = maxX - minX;
+    const scale2 = ((maxSX - minSX) / src.faceWidth) ** 2;
+    // One vertex array per photo, reused every frame: x, y (reshaped), photo u, v (fixed),
+    // camera u, v (where that spot of your face is in the camera picture), alpha.
+    if (!src.verts) {
+      src.verts = new Float32Array(triCount * 3 * 7);
+      for (let v = 0; v < triCount * 3; v += 1) {
+        src.verts[v * 7 + 2] = src.points[tris[v] * 2] / src.width;
+        src.verts[v * 7 + 3] = src.points[tris[v] * 2 + 1] / src.height;
+      }
+    }
+    const verts = src.verts;
+    const iw = 1 / output.width;
+    const ih = 1 / output.height;
     for (let t = 0; t < triCount; t += 1) {
       const a = tris[t * 3];
       const b = tris[t * 3 + 1];
       const c = tris[t * 3 + 2];
       // Triangles that shrink or flip are turning away from the camera: fade them out.
-      const ratio = triArea(points, a, b, c) / (src.srcAreas[t] * scale2 || 1);
-      const facing = smoothstep(0.15, 0.55, ratio);
-      for (const i of [a, b, c]) {
-        verts[o++] = points[i * 2];
-        verts[o++] = points[i * 2 + 1];
-        verts[o++] = src.points[i * 2] / src.width;
-        verts[o++] = src.points[i * 2 + 1] / src.height;
-        verts[o++] = src.feather[i] * facing;
+      const ratio = triArea(shaped, a, b, c) / (src.srcAreas[t] * scale2 || 1);
+      const facing = smoothstep(TUNE.turnLo, TUNE.turnHi, ratio);
+      const o = t * 21;
+      for (let k = 0; k < 3; k += 1) {
+        const i = k === 0 ? a : k === 1 ? b : c;
+        const q = o + k * 7;
+        verts[q] = shaped[i * 2];
+        verts[q + 1] = shaped[i * 2 + 1];
+        verts[q + 4] = points[i * 2] * iw;
+        verts[q + 5] = points[i * 2 + 1] * ih;
+        verts[q + 6] = src.feather[i] * facing;
       }
     }
 
@@ -619,28 +1100,350 @@ export class LiteFaceAI {
     gl.uniform1f(this.loc.uFrameLod, Math.max(0, Math.log2(targetWidth / TUNE.blurDiv)));
     gl.uniform1f(this.loc.uShading, TUNE.shading);
     gl.uniform1f(this.loc.uDetail, TUNE.detail);
-    gl.uniform1f(this.loc.uStrength, 1.0);
+    gl.uniform1f(this.loc.uStrength, strength);
+    const camGlasses = this.camGlasses > 0.05 ? this.camGlasses : 0;
+    gl.uniform1f(this.loc.uCamGlasses, camGlasses);
+    if (camGlasses) {
+      const eyes = eyeFrame((i) => [points[i * 2], points[i * 2 + 1]]);
+      gl.uniform2fv(this.loc.uGlassR, eyes.r);
+      gl.uniform2fv(this.loc.uGlassL, eyes.l);
+      gl.uniform2fv(this.loc.uGlassAx, eyes.ax);
+      gl.uniform1f(this.loc.uGlassEd, eyes.ed);
+      gl.uniform1f(this.loc.uGlassLod, Math.max(0, Math.log2(0.15 * eyes.ed)));
+    }
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.faceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
-    const stride = 5 * 4;
+    if (this.faceBufferLength !== verts.length) {
+      gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+      this.faceBufferLength = verts.length;
+    } else {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, verts);
+    }
+    const stride = 7 * 4;
     gl.enableVertexAttribArray(this.loc.fPos);
     gl.vertexAttribPointer(this.loc.fPos, 2, gl.FLOAT, false, stride, 0);
     gl.enableVertexAttribArray(this.loc.fSrcUV);
     gl.vertexAttribPointer(this.loc.fSrcUV, 2, gl.FLOAT, false, stride, 8);
+    gl.enableVertexAttribArray(this.loc.fFrameUV);
+    gl.vertexAttribPointer(this.loc.fFrameUV, 2, gl.FLOAT, false, stride, 16);
     gl.enableVertexAttribArray(this.loc.fAlpha);
-    gl.vertexAttribPointer(this.loc.fAlpha, 1, gl.FLOAT, false, stride, 16);
+    gl.vertexAttribPointer(this.loc.fAlpha, 1, gl.FLOAT, false, stride, 24);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArrays(gl.TRIANGLES, 0, triCount * 3);
     gl.disable(gl.BLEND);
     gl.disableVertexAttribArray(this.loc.fPos);
     gl.disableVertexAttribArray(this.loc.fSrcUV);
+    gl.disableVertexAttribArray(this.loc.fFrameUV);
     gl.disableVertexAttribArray(this.loc.fAlpha);
+  }
+
+  // Your face points moved towards the photo's face shape. The photo's points are first aligned to
+  // your head (rotation, scale and shift fitted on points that don't move with expression), so only
+  // proportions change: head pose stays yours. Lips mostly move as one piece and your eyes keep their
+  // own shape (only moved and scaled to the photo's eye corners), so blinks and speech come through.
+  reshape(points) {
+    const src = this.source;
+    const n = MESH_POINTS;
+    const cam = this.cam3 || (this.cam3 = new Float32Array(n * 3));
+    const flat = !TUNE.shape3d;
+    if (flat && !src.points2) src.points2 = src.points3.map((v, i) => (i % 3 === 2 ? 0 : v));
+    const photo = flat ? src.points2 : src.points3;
+    for (let i = 0; i < n; i += 1) {
+      cam[i * 3] = points[i * 2];
+      cam[i * 3 + 1] = points[i * 2 + 1];
+      cam[i * 3 + 2] = flat ? 0 : this.depth[i];
+    }
+    const { s, r, ca, cb } = fitSimilarity3(photo, cam, SHAPE_FIT);
+    // Your resting face: a slow average of your points with the head pose taken out (in the photo's
+    // frame). The move is photo minus rest, so expressions (you now minus you at rest) pass straight
+    // through: an open mouth, raised brows or a blink are not pulled back to the photo's.
+    // A restarted smoother hands over a new points array, and that restarts the rest shape too.
+    const now = performance.now();
+    const fresh = !this.rest || this.restFor !== points || this.restFlat !== flat;
+    if (fresh) {
+      this.rest = new Float32Array(n * 3);
+      this.restFor = points;
+      this.restFlat = flat;
+      this.restFrames = 0;
+    }
+    const rest = this.rest;
+    // A plain running mean at first (no single start-up frame dominates), then a slow moving average.
+    this.restFrames += 1;
+    const slow = TUNE.shapeRest > 0 && !fresh ? 1 - Math.exp(-Math.max(0, now - this.restAt) / 1000 / TUNE.shapeRest) : 1;
+    const follow = Math.max(1 / this.restFrames, slow);
+    this.restAt = now;
+    for (let i = 0; i < n; i += 1) {
+      const x = cam[i * 3] - cb[0];
+      const y = cam[i * 3 + 1] - cb[1];
+      const z = cam[i * 3 + 2] - cb[2];
+      for (let k = 0; k < 3; k += 1) {
+        const q = (r[k] * x + r[3 + k] * y + r[6 + k] * z) / s + ca[k]; // your point in the photo's frame
+        rest[i * 3 + k] += (q - rest[i * 3 + k]) * follow;
+      }
+    }
+    // The photo's own expression shouldn't come over either: as far as its mouth is open wider than
+    // yours at rest, lift its lower lip, chin and lower face back up (along the nose, the face's "down").
+    let ux = photo[2 * 3] - photo[168 * 3];
+    let uy = photo[2 * 3 + 1] - photo[168 * 3 + 1];
+    let uz = photo[2 * 3 + 2] - photo[168 * 3 + 2];
+    const ul = Math.hypot(ux, uy, uz) || 1;
+    ux /= ul;
+    uy /= ul;
+    uz /= ul;
+    const gap = (p, i, j) => (p[j * 3] - p[i * 3]) * ux + (p[j * 3 + 1] - p[i * 3 + 1]) * uy + (p[j * 3 + 2] - p[i * 3 + 2]) * uz;
+    const open = (gap(photo, 13, 14) - gap(rest, 13, 14)) * TUNE.shapeJaw;
+    // d: from each of your points to where it goes (the aligned photo point, when you are at rest).
+    const d = this.shapeD || (this.shapeD = new Float32Array(n * 2));
+    for (let i = 0; i < n; i += 1) {
+      const lift = src.jaw[i] * open;
+      const ox = photo[i * 3] - rest[i * 3] - ux * lift;
+      const oy = photo[i * 3 + 1] - rest[i * 3 + 1] - uy * lift;
+      const oz = photo[i * 3 + 2] - rest[i * 3 + 2] - uz * lift;
+      d[i * 2] = s * (r[0] * ox + r[1] * oy + r[2] * oz);
+      d[i * 2 + 1] = s * (r[3] * ox + r[4] * oy + r[5] * oz);
+    }
+    // Mouth: the upper lip centre's move (it rides on the skull) for the lips and the skin around them,
+    // plus only part of their own shape: the photo's smile (corners, cheeks) is expression, not shape.
+    // Further than shapeZone (share of the face width) from the lips, points take their full shape.
+    const lx = (d[0] + d[37 * 2] + d[267 * 2]) / 3;
+    const ly = (d[1] + d[37 * 2 + 1] + d[267 * 2 + 1]) / 3;
+    for (let i = 0; i < n; i += 1) {
+      let w;
+      if (src.lips[i]) w = TUNE.shapeMouth + (TUNE.shapeLips - TUNE.shapeMouth) * (src.lips[i] - 1);
+      else if (src.nearMouth[i] < TUNE.shapeZone) w = TUNE.shapeLips + (1 - TUNE.shapeLips) * smoothstep(0, TUNE.shapeZone, src.nearMouth[i]);
+      else continue;
+      d[i * 2] = lx + (d[i * 2] - lx) * w;
+      d[i * 2 + 1] = ly + (d[i * 2 + 1] - ly) * w;
+    }
+    // Eyes: the similarity that takes your eye corners to the photo's, applied to the whole eye.
+    [RIGHT_EYE, LEFT_EYE].forEach((ring, e) => {
+      const [a, b] = EYE_CORNERS[e];
+      const vx = points[b * 2] - points[a * 2];
+      const vy = points[b * 2 + 1] - points[a * 2 + 1];
+      const wx = vx + d[b * 2] - d[a * 2];
+      const wy = vy + d[b * 2 + 1] - d[a * 2 + 1];
+      const len = vx * vx + vy * vy || 1;
+      const kr = (wx * vx + wy * vy) / len - 1; // (corner-to-corner change) − 1, as a complex number
+      const ki = (wy * vx - wx * vy) / len;
+      const ax = d[a * 2];
+      const ay = d[a * 2 + 1];
+      for (const i of ring) {
+        if (i === a || i === b) continue;
+        const px = points[i * 2] - points[a * 2];
+        const py = points[i * 2 + 1] - points[a * 2 + 1];
+        const rx = ax + kr * px - ki * py;
+        const ry = ay + ki * px + kr * py;
+        d[i * 2] = rx + (d[i * 2] - rx) * TUNE.shapeEyes;
+        d[i * 2 + 1] = ry + (d[i * 2 + 1] - ry) * TUNE.shapeEyes;
+      }
+    });
+    // No folds: where the reshape would turn a triangle of the camera warp over, smooth its corners'
+    // moves towards their neighbours' (and, if that isn't enough, shrink them), over a few rounds.
+    // A fold shows as torn, doubled skin (at the jaw and cheeks when the photo's head is turned
+    // differently, the nostrils and the mouth corners).
+    // from/to: warp points (face points, then the fixed ring) before and after the reshape.
+    const m = n + FACE_OVAL.length;
+    const from = this.foldFrom || (this.foldFrom = new Float32Array(m * 2));
+    const to = this.foldTo || (this.foldTo = new Float32Array(m * 2));
+    from.set(points.subarray(0, n * 2));
+    ringAround(points, from, n * 2);
+    for (let i = 0; i < n * 2; i += 1) to[i] = points[i] + d[i] * TUNE.shape;
+    to.set(from.subarray(n * 2), n * 2);
+    const tri = src.warpTris;
+    const triCount = tri.length / 3;
+    if (!this.foldBefore || this.foldBefore.length !== triCount) this.foldBefore = new Float32Array(triCount);
+    const before = this.foldBefore;
+    const eased = this.foldEased || (this.foldEased = new Int32Array(m));
+    eased.fill(0);
+    const { warpNbr, warpNbrAt } = src;
+    const area = (p, t) => {
+      const a = tri[t] * 2;
+      const b = tri[t + 1] * 2;
+      const c = tri[t + 2] * 2;
+      return (p[b] - p[a]) * (p[c + 1] - p[a + 1]) - (p[c] - p[a]) * (p[b + 1] - p[a + 1]);
+    };
+    for (let t = 0; t < triCount; t += 1) before[t] = area(from, t * 3);
+    for (let round = 1; round <= FOLD_ROUNDS; round += 1) {
+      let any = false;
+      for (let t = 0; t < triCount; t += 1) {
+        const a = tri[t * 3];
+        const b = tri[t * 3 + 1];
+        const c = tri[t * 3 + 2];
+        // After the first round only triangles with a corner that just moved can have changed.
+        if (round > 1 && eased[a] !== round - 1 && eased[b] !== round - 1 && eased[c] !== round - 1) continue;
+        if (Math.abs(before[t]) < 2 || area(to, t * 3) / before[t] > 0) continue;
+        for (const v of [a, b, c]) {
+          if (v >= n || eased[v] === round) continue;
+          eased[v] = round;
+          if (round <= FOLD_SMOOTH_ROUNDS) {
+            // Halfway to the neighbours' average move (the ring's points don't move).
+            let sx = 0;
+            let sy = 0;
+            for (let k = warpNbrAt[v]; k < warpNbrAt[v + 1]; k += 1) {
+              const u = warpNbr[k];
+              if (u < n) {
+                sx += d[u * 2];
+                sy += d[u * 2 + 1];
+              }
+            }
+            const cnt = warpNbrAt[v + 1] - warpNbrAt[v] || 1;
+            d[v * 2] = (d[v * 2] + sx / cnt) / 2;
+            d[v * 2 + 1] = (d[v * 2 + 1] + sy / cnt) / 2;
+          } else {
+            d[v * 2] *= FOLD_EASE;
+            d[v * 2 + 1] *= FOLD_EASE;
+          }
+          to[v * 2] = points[v * 2] + d[v * 2] * TUNE.shape;
+          to[v * 2 + 1] = points[v * 2 + 1] + d[v * 2 + 1] * TUNE.shape;
+          any = true;
+        }
+      }
+      if (!any) break;
+    }
+    return to.subarray(0, n * 2);
+  }
+
+  // Your camera picture through the whole face mesh (eyes and mouth included): sampled at your face
+  // points, drawn at the reshaped ones. A ring outside the face stays put, so hair and neck just stretch.
+  drawWarp(points, shaped) {
+    const gl = this.gl;
+    const n = MESH_POINTS;
+    const m = n + FACE_OVAL.length;
+    const v = this.warpVerts || (this.warpVerts = new Float32Array(m * 4));
+    const ring = this.warpRing || (this.warpRing = new Float32Array(FACE_OVAL.length * 2));
+    ringAround(points, ring, 0);
+    for (let i = 0; i < m; i += 1) {
+      const x = i < n ? points[i * 2] : ring[(i - n) * 2];
+      const y = i < n ? points[i * 2 + 1] : ring[(i - n) * 2 + 1];
+      v[i * 4] = i < n ? shaped[i * 2] : x;
+      v[i * 4 + 1] = i < n ? shaped[i * 2 + 1] : y;
+      v[i * 4 + 2] = x / output.width;
+      v[i * 4 + 3] = y / output.height;
+    }
+    gl.useProgram(this.warpProgram);
+    gl.uniform1i(this.loc.wFrame, 1);
+    gl.uniform2f(this.loc.wViewport, output.width, output.height);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.warpBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, v, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(this.loc.wPos);
+    gl.vertexAttribPointer(this.loc.wPos, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(this.loc.wUV);
+    gl.vertexAttribPointer(this.loc.wUV, 2, gl.FLOAT, false, 16, 8);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.warpIndex);
+    gl.drawElements(gl.TRIANGLES, this.source.warpCount, gl.UNSIGNED_SHORT, 0);
+    gl.disableVertexAttribArray(this.loc.wPos);
+    gl.disableVertexAttribArray(this.loc.wUV);
   }
 }
 
 // Signed area: negative when the triangle has flipped over.
 function triArea(p, a, b, c) {
   return ((p[b * 2] - p[a * 2]) * (p[c * 2 + 1] - p[a * 2 + 1]) - (p[c * 2] - p[a * 2]) * (p[b * 2 + 1] - p[a * 2 + 1])) / 2;
+}
+
+// The face outline pushed outwards from its centre by TUNE.shapeRing, written into out from offset o.
+function ringAround(points, out, o) {
+  let cx = 0;
+  let cy = 0;
+  for (const i of FACE_OVAL) {
+    cx += points[i * 2];
+    cy += points[i * 2 + 1];
+  }
+  cx /= FACE_OVAL.length;
+  cy /= FACE_OVAL.length;
+  const k = 1 + TUNE.shapeRing;
+  for (const i of FACE_OVAL) {
+    out[o++] = cx + (points[i * 2] - cx) * k;
+    out[o++] = cy + (points[i * 2 + 1] - cy) * k;
+  }
+}
+
+// Eigenvector of the largest eigenvalue of a symmetric 4x4 matrix (Jacobi rotations; m is overwritten).
+function topEigenvector4(m) {
+  const v = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  for (let sweep = 0; sweep < 10; sweep += 1) {
+    let off = 0;
+    let diag = 0;
+    for (let p = 0; p < 4; p += 1) {
+      diag += m[p * 5] * m[p * 5];
+      for (let q = p + 1; q < 4; q += 1) off += m[p * 4 + q] * m[p * 4 + q];
+    }
+    if (off <= 1e-24 * diag) break;
+    for (let p = 0; p < 3; p += 1) {
+      for (let q = p + 1; q < 4; q += 1) {
+        const apq = m[p * 4 + q];
+        if (apq === 0) continue;
+        const theta = (m[q * 5] - m[p * 5]) / (2 * apq);
+        const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1);
+        const s = t * c;
+        for (let k = 0; k < 4; k += 1) {
+          const kp = m[k * 4 + p];
+          const kq = m[k * 4 + q];
+          m[k * 4 + p] = c * kp - s * kq;
+          m[k * 4 + q] = s * kp + c * kq;
+        }
+        for (let k = 0; k < 4; k += 1) {
+          const pk = m[p * 4 + k];
+          const qk = m[q * 4 + k];
+          m[p * 4 + k] = c * pk - s * qk;
+          m[q * 4 + k] = s * pk + c * qk;
+          const vp = v[k * 4 + p];
+          const vq = v[k * 4 + q];
+          v[k * 4 + p] = c * vp - s * vq;
+          v[k * 4 + q] = s * vp + c * vq;
+        }
+      }
+    }
+  }
+  let best = 0;
+  for (let i = 1; i < 4; i += 1) if (m[i * 5] > m[best * 5]) best = i;
+  return [v[best], v[4 + best], v[8 + best], v[12 + best]];
+}
+
+// Least-squares similarity (scale s, rotation r, shift) taking xyz points a onto xyz points b over idx:
+// b ≈ s·r·(a − ca) + cb. Horn's quaternion method, so a turned head is a rotation, not a change of shape.
+function fitSimilarity3(a, b, idx) {
+  const ca = [0, 0, 0];
+  const cb = [0, 0, 0];
+  for (const i of idx) {
+    for (let k = 0; k < 3; k += 1) {
+      ca[k] += a[i * 3 + k];
+      cb[k] += b[i * 3 + k];
+    }
+  }
+  for (let k = 0; k < 3; k += 1) {
+    ca[k] /= idx.length;
+    cb[k] /= idx.length;
+  }
+  const S = [0, 0, 0, 0, 0, 0, 0, 0, 0]; // S[j*3+k] = Σ a_j·b_k (centred)
+  let aa = 0;
+  for (const i of idx) {
+    const ax = a[i * 3] - ca[0];
+    const ay = a[i * 3 + 1] - ca[1];
+    const az = a[i * 3 + 2] - ca[2];
+    const bx = b[i * 3] - cb[0];
+    const by = b[i * 3 + 1] - cb[1];
+    const bz = b[i * 3 + 2] - cb[2];
+    S[0] += ax * bx; S[1] += ax * by; S[2] += ax * bz;
+    S[3] += ay * bx; S[4] += ay * by; S[5] += ay * bz;
+    S[6] += az * bx; S[7] += az * by; S[8] += az * bz;
+    aa += ax * ax + ay * ay + az * az;
+  }
+  const [xx, xy, xz, yx, yy, yz, zx, zy, zz] = S;
+  const [w, x, y, z] = topEigenvector4([
+    xx + yy + zz, yz - zy, zx - xz, xy - yx,
+    yz - zy, xx - yy - zz, xy + yx, zx + xz,
+    zx - xz, xy + yx, -xx + yy - zz, yz + zy,
+    xy - yx, zx + xz, yz + zy, -xx - yy + zz,
+  ]);
+  const r = [
+    w * w + x * x - y * y - z * z, 2 * (x * y - w * z), 2 * (x * z + w * y),
+    2 * (x * y + w * z), w * w - x * x + y * y - z * z, 2 * (y * z - w * x),
+    2 * (x * z - w * y), 2 * (y * z + w * x), w * w - x * x - y * y + z * z,
+  ];
+  let ab = 0; // Σ b·(r a), for the scale
+  for (let j = 0; j < 3; j += 1) for (let k = 0; k < 3; k += 1) ab += r[k * 3 + j] * S[j * 3 + k];
+  return { s: aa > 0 ? ab / aa : 1, r, ca, cb };
 }

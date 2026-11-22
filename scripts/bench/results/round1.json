@@ -1,0 +1,113 @@
+{
+  "scale": "idRef = ArcFace cosine between output face and photo; 100% mark = Local AI engine on the same holdout pairs",
+  "holdout": {
+    "floor_no_change": {
+      "engine": "original",
+      "split": "holdout",
+      "params": {},
+      "pairs": 36,
+      "scored": 36,
+      "failures": 0,
+      "idRef": 0.0462,
+      "idRefMedian": 0.0415,
+      "idOrig": 1,
+      "idBase": 0.0462,
+      "pose": 0,
+      "matchRate": 0
+    },
+    "lite_before": {
+      "engine": "lite",
+      "split": "holdout",
+      "params": {},
+      "pairs": 36,
+      "scored": 36,
+      "failures": 0,
+      "idRef": 0.3643,
+      "idRefMedian": 0.3605,
+      "idOrig": 0.2815,
+      "idBase": 0.0462,
+      "pose": 0.0236,
+      "matchRate": 0.333,
+      "renderMsMedian": 252
+    },
+    "lite_round1": {
+      "engine": "lite",
+      "split": "holdout",
+      "params": {},
+      "pairs": 36,
+      "scored": 36,
+      "failures": 0,
+      "idRef": 0.5274,
+      "idRefMedian": 0.5236,
+      "idOrig": 0.1677,
+      "idBase": 0.0462,
+      "pose": 0.0532,
+      "matchRate": 0.944,
+      "renderMsMedian": 292
+    },
+    "local_ai_ceiling": {
+      "engine": "local",
+      "split": "holdout",
+      "params": {},
+      "pairs": 36,
+      "scored": 36,
+      "failures": 0,
+      "idRef": 0.7385,
+      "idRefMedian": 0.7419,
+      "idOrig": 0.1869,
+      "idBase": 0.0462,
+      "pose": 0.0255,
+      "matchRate": 1
+    }
+  },
+  "train": {
+    "floor_no_change": {
+      "engine": "original",
+      "split": "train",
+      "params": {},
+      "pairs": 66,
+      "scored": 66,
+      "failures": 0,
+      "idRef": 0.0172,
+      "idRefMedian": 0.0141,
+      "idOrig": 1,
+      "idBase": 0.0172,
+      "pose": 0,
+      "matchRate": 0
+    },
+    "lite_before": {
+      "engine": "lite",
+      "split": "train",
+      "params": {},
+      "pairs": 66,
+      "scored": 66,
+      "failures": 0,
+      "idRef": 0.3392,
+      "idRefMedian": 0.3428,
+      "idOrig": 0.285,
+      "idBase": 0.0172,
+      "pose": 0.0251,
+      "matchRate": 0.273,
+      "renderMsMedian": 282
+    },
+    "lite_round1": {
+      "engine": "lite",
+      "split": "train",
+      "params": {},
+      "pairs": 66,
+      "scored": 66,
+      "failures": 0,
+      "idRef": 0.4904,
+      "idRefMedian": 0.4957,
+      "idOrig": 0.1611,
+      "idBase": 0.0172,
+      "pose": 0.0603,
+      "matchRate": 0.803,
+      "renderMsMedian": 252
+    }
+  },
+  "holdout_percent_of_ceiling": {
+    "lite_before": 49.3,
+    "lite_round1": 71.4
+  }
+}
