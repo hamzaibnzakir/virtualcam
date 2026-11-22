@@ -3,6 +3,7 @@
 // Face engine process. Runs the local face swap away from the app window so the UI never stutters.
 // The studio talks to it directly over a MessagePort:
 //   -> { type: 'load', modelsDir, preferred }        <- { type: 'loaded', provider, deviceLabel, ... } | { type: 'error', ... }
+//   -> { type: 'swap', id, pixels }  (128x128 aligned crop)  <- { type: 'swapped', id, pixels, size, toCrop, ms, stages } | { skipped }
 //   While a request is running:                      <- { type: 'progress', request, step, seconds } every few seconds
 //   -> { type: 'reference', width, height, pixels }  <- { type: 'reference', found }
 //   -> { type: 'clear-reference' }
@@ -130,12 +131,29 @@ async function handle(msg) {
         }
         break;
       }
+      case 'swap': {
+        // A face the studio already tracked, cropped and aligned (128x128): no face finding here.
+        if (!swapper || busy) {
+          reply({ type: 'swapped', id: msg.id, skipped: true });
+          break;
+        }
+        busy = true;
+        const started = Date.now();
+        try {
+          const face = await swapper.swapCrop(toBytes(msg.pixels));
+          if (!face) reply({ type: 'swapped', id: msg.id, skipped: true });
+          else reply({ type: 'swapped', id: msg.id, ms: Date.now() - started, stages: face.ms, size: face.size, toCrop: face.toCrop, pixels: face.rgba });
+        } finally {
+          busy = false;
+        }
+        break;
+      }
       default:
         break;
     }
   } catch (err) {
     const message = (err && err.message) || String(err);
-    if (msg.type !== 'frame') log(`${msg.type}: failed while ${step}: ${message}`);
+    if (msg.type !== 'frame' && msg.type !== 'swap') log(`${msg.type}: failed while ${step}: ${message}`);
     reply({ type: 'error', request: msg.type, id: msg.id, step, message });
   } finally {
     if (heartbeat) clearInterval(heartbeat);

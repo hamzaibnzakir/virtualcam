@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { fivePoints, KPS_OFFSET } from '../../src/renderer/engine/face-points.js';
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -34,6 +35,7 @@ const flag = (name) => process.argv.includes(`--${name}`);
 const split = arg('split', 'train');
 const limit = Number(arg('limit', '0'));
 const engine = arg('engine', 'lite');
+const kpsOffset = arg('kps-offset', '') ? JSON.parse(arg('kps-offset', '')) : KPS_OFFSET;
 const params = JSON.parse(arg('params', '{}'));
 const frames = Number(arg('frames', '4'));
 const imageCount = Number(arg('images', '0'));
@@ -143,7 +145,7 @@ const readRgba = (file) => new Uint8Array(readFileSync(file));
 
 const needInputs = pairs.some((p) => p.writeOrig || p.writeRef);
 let rendered = { results: [] };
-if (engine === 'lite') rendered = await render('lite', pairs);
+if (engine === 'lite' || engine === 'hybrid') rendered = await render('lite', pairs.map((p) => ({ ...p, writeOrig: p.writeOrig || engine === 'hybrid', writeRef: p.writeRef || engine === 'hybrid' })));
 else if (needInputs || engine === 'local') {
   // Other engines only need the inputs; local also needs the raw frames every time.
   await render('inputs', pairs.map((p) => ({ ...p, writeOrig: p.writeOrig || engine === 'local', writeRef: p.writeRef || engine === 'local' })));
@@ -232,7 +234,7 @@ sheet.save(out + '/motion.jpg', quality=88)
 // Models load only now, so they don't hold memory while Electron renders.
 await scorer.load();
 let local = null;
-if (engine === 'local') {
+if (engine === 'local' || engine === 'hybrid') {
   const ort = require('onnxruntime-node');
   const { FaceSwapper } = require('../../src/main/faceswap/swapper.js');
   local = new FaceSwapper(ort, modelsDir);
@@ -255,10 +257,18 @@ for (const p of pairs) {
   row.idBase = cos(orig.emb, ref.emb);
   let outFile = join(out, `${p.target}.out.rgba`);
   if (engine === 'original') outFile = join(out, `${p.target}.orig.rgba`);
-  if (engine === 'local') {
+  if (engine === 'local' || engine === 'hybrid') {
     const frame = readRgba(join(out, `${p.target}.orig.rgba`));
     await local.setReference(readRgba(join(out, `${p.ref}.ref.rgba`)), 512, 512);
-    const faces = await local.process(frame, W, H);
+    let kps;
+    if (engine === 'hybrid') {
+      // Local AI aligned by Lite's tracker instead of its own face finder.
+      const lmFile = join(out, `${p.target}.lm.json`);
+      kps = existsSync(lmFile) ? fivePoints(Float32Array.from(JSON.parse(readFileSync(lmFile, 'utf8'))), kpsOffset) : null;
+      row.lmKps = kps;
+      row.detKps = orig.kps;
+    }
+    const faces = engine === 'hybrid' && !kps ? [] : await local.process(frame, W, H, { kps });
     pasteFaces(frame, W, H, faces);
     writeFileSync(outFile, Buffer.from(frame.buffer));
   }

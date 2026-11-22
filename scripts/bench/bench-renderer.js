@@ -291,9 +291,11 @@ async function run() {
       r.renderMs = Math.round(times[times.length - 1]);
       r.camGlasses = [lite.camGlassesScore, lite.camGlasses];
       fs.writeFileSync(path.join(config.outDir, `${pair.target}.out.rgba`), Buffer.from(rgbaOf(lite.canvas).buffer));
+      // The tracked points (for the hybrid engine, which swaps with them in place of its face finder).
+      if (lite.points) fs.writeFileSync(path.join(config.outDir, `${pair.target}.lm.json`), JSON.stringify(Array.from(lite.points, (v) => Math.round(v * 100) / 100)));
       // Sweep (tuning aid): re-render the same tracked points with each parameter set.
       if (config.sweep && lite.faceFound) {
-        const points = Float32Array.from(lite.smoother.x);
+        const points = Float32Array.from(lite.points);
         r.sweepMs = [];
         for (let k = 0; k < config.sweep.length; k += 1) {
           Object.assign(liteTuning, defaults, config.params || {}, config.sweep[k]);

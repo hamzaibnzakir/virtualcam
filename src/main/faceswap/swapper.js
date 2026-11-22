@@ -255,9 +255,10 @@ class FaceSwapper {
   // Swaps the largest face (or up to maxFaces) in a frame.
   // Returns [{ rgba, size, toFrame: [a,c,e,b,d,f] }]: a square RGBA face whose alpha already holds
   // the soft edge, plus the transform that places it on the frame.
-  async process(rgba, width, height, { maxFaces = 1 } = {}) {
+  // kps: the 5 alignment points when the caller already tracked the face (skips the face finder).
+  async process(rgba, width, height, { maxFaces = 1, kps = null } = {}) {
     if (!this.latent) return [];
-    const faces = (await this.detector.detect(rgba, width, height)).slice(0, maxFaces);
+    const faces = kps ? [{ kps }] : (await this.detector.detect(rgba, width, height)).slice(0, maxFaces);
     const results = [];
     for (const face of faces) {
       const m = similarity(face.kps, alignmentTarget(SWAP_SIZE));
@@ -283,6 +284,40 @@ class FaceSwapper {
       }
     }
     return results;
+  }
+
+  // Swaps a face the caller already cropped and aligned (a 128x128 RGBA crop in the swap model's
+  // layout). Returns { rgba, size, toCrop, ms }: the swapped face (alpha = soft edge), the transform
+  // from its pixels back to the crop, and the time taken per stage.
+  async swapCrop(crop) {
+    if (!this.latent) return null;
+    const t0 = Date.now();
+    const plane = SWAP_SIZE * SWAP_SIZE;
+    const target = this.swapBuffer || (this.swapBuffer = new Float32Array(3 * plane));
+    for (let i = 0; i < plane; i += 1) {
+      target[i] = crop[i * 4] / 255;
+      target[plane + i] = crop[i * 4 + 1] / 255;
+      target[2 * plane + i] = crop[i * 4 + 2] / 255;
+    }
+    const out = await this.swapper.run({
+      target: new this.ort.Tensor('float32', target, [1, 3, SWAP_SIZE, SWAP_SIZE]),
+      source: new this.ort.Tensor('float32', this.latent, [1, 512]),
+    });
+    const pred = out[this.swapper.outputNames[0]].data;
+    const face128 = new Uint8ClampedArray(plane * 4);
+    for (let i = 0; i < plane; i += 1) {
+      face128[i * 4] = pred[i] * 255;
+      face128[i * 4 + 1] = pred[plane + i] * 255;
+      face128[i * 4 + 2] = pred[2 * plane + i] * 255;
+      face128[i * 4 + 3] = this.mask128[i] * 255;
+    }
+    const swapMs = Date.now() - t0;
+    if (this.enhance && this.enhancer) {
+      const t1 = Date.now();
+      const enhanced = await this.enhanceFace(face128, [1, 0, 0, 0, 1, 0]);
+      return { rgba: enhanced.rgba, size: enhanced.size, toCrop: enhanced.toFrame, ms: { swap: swapMs, enhance: Date.now() - t1 } };
+    }
+    return { rgba: face128, size: SWAP_SIZE, toCrop: [1, 0, 0, 0, 1, 0], ms: { swap: swapMs } };
   }
 
   async enhanceFace(face128, toFrame) {

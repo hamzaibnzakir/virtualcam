@@ -1,6 +1,17 @@
-// Local face swap adapter. Frames go to the face engine process; swapped faces come back and are
-// painted onto that same frame, so the face always lines up with the picture it was made from.
+// Local face swap adapter, joined with Lite's face tracker:
+//   - every camera frame, the tracker finds your face (fast, on the graphics chip);
+//   - when the AI is free, the studio cuts out your face, aligned the way the swap model wants,
+//     and sends just that small crop to the face engine process;
+//   - the swapped face that comes back is bent onto your face as it is *now*, every frame, so the
+//     picture moves at full camera speed however long the AI takes per face.
+// If the tracker can't start, whole frames go to the engine instead (its own face finder).
+import { FaceLandmarker } from '@mediapipe/tasks-vision';
 import { output } from './state.js';
+import { PointSmoother } from './ai-lite.js';
+import { FaceWarp } from './face-warp.js';
+import { MESH_POINT_COUNT, alignmentTarget, composeAffine, fivePoints, invertAffine, similarity } from './face-points.js';
+
+const CROP = 128; // the swap model's input size
 
 const FRESH_MS = 1000; // older results than this are not shown (the real picture shows instead)
 
@@ -41,6 +52,22 @@ export class LocalFaceAI {
     this.faceCanvas = document.createElement('canvas');
     this.faceCtx = this.faceCanvas.getContext('2d');
 
+    // Tracker mode (see the top of this file).
+    this.tracker = null;
+    this.trackerFailed = false;
+    this.smoother = new PointSmoother();
+    this.raw = new Float32Array(MESH_POINT_COUNT * 2);
+    this.points = null;
+    this.lastTs = 0;
+    this.lastTickAt = 0;
+    this.warp = null;
+    this.crop = document.createElement('canvas');
+    this.crop.width = CROP;
+    this.crop.height = CROP;
+    this.cropCtx = this.crop.getContext('2d', { willReadFrequently: true, alpha: false });
+    this.cropCtx.imageSmoothingQuality = 'high';
+    this.stats.stages = null;
+
     api.onEngineMessage((msg) => this.handleMessage(msg));
     api.onEngineExit(() => {
       this.engineReady = false;
@@ -61,6 +88,10 @@ export class LocalFaceAI {
   }
 
   get live() {
+    if (this.tracker) {
+      // The picture is redrawn every frame (with the face whenever one is tracked).
+      return this.state === 'generating' && this.lastResultAt > 0 && performance.now() - this.lastTickAt < FRESH_MS;
+    }
     return this.state === 'generating' && performance.now() - this.lastResultAt < FRESH_MS;
   }
 
@@ -123,8 +154,11 @@ export class LocalFaceAI {
           const res = await this.waitFor('reference');
           this.applied.refKey = res.found ? target.refKey : `missing:${target.refKey}`;
           this.step = '';
+          if (this.warp) this.warp.clear(); // don't show the previous person's face
         }
       }
+
+      if (!this.tracker && !this.trackerFailed) await this.startTracker();
 
       if (!target.refBlob) this.setState('needs-reference');
       else if (this.applied.refKey !== target.refKey) this.setState('no-face');
@@ -132,6 +166,42 @@ export class LocalFaceAI {
     } catch (err) {
       this.setState('error');
       this.onError(`Local AI: ${(err && err.message) || err}`);
+    }
+  }
+
+  // The same face tracker Lite uses. Without it (no WebGL 2, say) the engine's own face finder is used.
+  async startTracker() {
+    try {
+      this.step = 'starting the face tracker';
+      this.onProgress(this.step);
+      const wasm = await this.api.readAsset('mediapipe/vision_wasm_internal.wasm');
+      const model = await this.api.readAsset('mediapipe/face_landmarker.task');
+      const fileset = {
+        wasmLoaderPath: new URL('mediapipe/vision_wasm_internal.js', document.baseURI).href,
+        wasmBinaryPath: URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' })),
+      };
+      const make = (delegate) =>
+        FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetBuffer: new Uint8Array(model), delegate },
+          runningMode: 'VIDEO',
+          numFaces: 1,
+          minFaceDetectionConfidence: 0.5,
+          minFacePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+      try {
+        this.tracker = await make('GPU');
+      } catch {
+        this.tracker = await make('CPU');
+      }
+      this.warp = new FaceWarp();
+    } catch (err) {
+      this.tracker = null;
+      this.warp = null;
+      this.trackerFailed = true;
+      console.warn(`Local AI: tracker unavailable, using the engine's face finder: ${(err && err.message) || err}`);
+    } finally {
+      this.step = '';
     }
   }
 
@@ -195,6 +265,10 @@ export class LocalFaceAI {
       this.handleResult(msg);
       return;
     }
+    if (msg.type === 'swapped') {
+      this.handleSwapped(msg);
+      return;
+    }
     if (msg.type === 'progress') {
       const replyType = msg.request === 'load' ? 'loaded' : msg.request;
       this.waiters.filter((w) => w.type === replyType).forEach((w) => w.arm());
@@ -205,7 +279,7 @@ export class LocalFaceAI {
       return;
     }
     if (msg.type === 'error') {
-      if (msg.request === 'frame') {
+      if (msg.request === 'frame' || msg.request === 'swap') {
         this.inFlight = null;
         return;
       }
@@ -229,6 +303,10 @@ export class LocalFaceAI {
 
   // Called by the compositor every frame with a function that draws the current source.
   tick(drawSource) {
+    if (this.tracker) {
+      this.tickTracked(drawSource);
+      return;
+    }
     if (this.state !== 'generating' || !this.engineReady || this.inFlight) return;
     if (this.input.width !== output.width || this.input.height !== output.height) {
       // Picture shape changed: follow it (canvas contexts keep their settings).
@@ -247,6 +325,86 @@ export class LocalFaceAI {
     } catch {
       this.inFlight = null;
     }
+  }
+
+  tickTracked(drawSource) {
+    if (this.state !== 'generating' || !this.engineReady) return;
+    const { width, height } = output;
+    if (this.input.width !== width || this.input.height !== height) {
+      this.input.width = width;
+      this.input.height = height;
+      this.canvas.width = width;
+      this.canvas.height = height;
+      this.smoother.reset();
+      this.warp.clear();
+    }
+    drawSource(this.inputCtx, width, height);
+    const t = performance.now();
+    const ts = Math.max(this.lastTs + 1, Math.floor(t));
+    this.lastTs = ts;
+    let landmarks = null;
+    try {
+      const result = this.tracker.detectForVideo(this.input, ts);
+      landmarks = result.faceLandmarks && result.faceLandmarks[0];
+    } catch {
+      landmarks = null;
+    }
+    if (landmarks) {
+      for (let i = 0; i < MESH_POINT_COUNT; i += 1) {
+        this.raw[i * 2] = landmarks[i].x * width;
+        this.raw[i * 2 + 1] = landmarks[i].y * height;
+      }
+    }
+    const points = this.smoother.update(landmarks ? this.raw : null, t);
+    this.points = points;
+
+    // The live picture, with the latest swapped face bent onto where your face is now.
+    this.ctx.drawImage(this.input, 0, 0);
+    if (points && this.warp.hasFace) {
+      this.warp.draw(width, height, points, t);
+      this.ctx.globalAlpha = this.smoother.strength;
+      this.ctx.drawImage(this.warp.canvas, 0, 0);
+      this.ctx.globalAlpha = 1;
+    }
+    this.lastTickAt = t;
+
+    // Ask for a new face whenever the engine is free.
+    if (!landmarks || !points || this.inFlight) return;
+    const kps = fivePoints(points);
+    const toCrop = kps && similarity(kps, alignmentTarget(CROP));
+    if (!toCrop) return;
+    const c = this.cropCtx;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = '#000';
+    c.fillRect(0, 0, CROP, CROP);
+    c.setTransform(toCrop[0], toCrop[3], toCrop[1], toCrop[4], toCrop[2], toCrop[5]);
+    c.drawImage(this.input, 0, 0);
+    const crop = c.getImageData(0, 0, CROP, CROP);
+    const id = ++this.frameId;
+    this.inFlight = { id, points: Float32Array.from(points), toCrop, sentAt: t };
+    try {
+      this.send({ type: 'swap', id, pixels: crop.data });
+    } catch {
+      this.inFlight = null;
+    }
+  }
+
+  handleSwapped(msg) {
+    const pending = this.inFlight;
+    if (!pending || pending.id !== msg.id) return;
+    this.inFlight = null;
+    if (msg.skipped || !this.warp) return;
+    const now = performance.now();
+    // Output pixels -> crop -> the swapped face's own pixels.
+    const toFace = composeAffine(invertAffine(msg.toCrop), pending.toCrop);
+    const px = msg.pixels;
+    this.warp.addFace(new Uint8Array(px.buffer, px.byteOffset, px.byteLength), msg.size, pending.points, toFace, now);
+    this.lastResultAt = now;
+    this.stats.ms = msg.ms || Math.round(now - pending.sentAt);
+    this.stats.stages = msg.stages || null;
+    this.resultTimes.push(now);
+    while (this.resultTimes.length && now - this.resultTimes[0] > 1000) this.resultTimes.shift();
+    this.stats.fps = this.resultTimes.length;
   }
 
   handleResult(msg) {

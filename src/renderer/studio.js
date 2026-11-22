@@ -447,8 +447,12 @@ function renderLocal() {
     ? `${lite.stats.fps} frames per second · ${lite.stats.ms} ms each · tracking on the ${lite.delegate === 'GPU' ? 'graphics chip' : 'processor'}`
     : '';
   const live = activeEngine === 'local' && local.state === 'generating';
+  const where = local.deviceLabel || (local.provider === 'dml' ? 'your graphics card' : local.provider === 'coreml' ? 'your Mac' : 'the processor');
+  const usable = local.tried.filter((t) => !t.error).length;
+  const st = local.stats.stages;
+  const split = st && st.enhance !== undefined ? ` (swap ${st.swap} ms + boost ${st.enhance} ms)` : '';
   $('local-stats').textContent = live
-    ? `${local.stats.fps} swaps per second · ${local.stats.ms} ms each · running on ${local.deviceLabel || (local.provider === 'dml' ? 'your graphics card' : local.provider === 'coreml' ? 'your Mac' : 'the processor')}${local.tried.filter((t) => !t.error).length > 1 ? ` (the fastest of ${local.tried.filter((t) => !t.error).length} tried)` : ''}`
+    ? `${local.tracker ? 'Your face is tracked every frame; the AI refreshes it ' : ''}${local.stats.fps} ${local.tracker ? 'times' : 'swaps'} per second · ${local.stats.ms} ms each${split} · AI on ${where}${usable > 1 ? ` (the fastest of ${usable} tried)` : ''}`
     : '';
 }
 
@@ -1139,8 +1143,16 @@ async function runSmokeTest() {
       const b = local.ctx.getImageData(600, 300, 80, 80).data;
       let diff = 0;
       for (let i = 0; i < a.length; i += 4) diff += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+      let localSaved = false;
+      if (api.smokeFiles.localOut) {
+        const png = await new Promise((r) => local.canvas.toBlob(r, 'image/png'));
+        localSaved = await api.smokeSave(api.smokeFiles.localOut, new Uint8Array(await png.arrayBuffer()));
+      }
       report.steps.push({
         step: 'local-swap',
+        tracked: Boolean(local.tracker),
+        faceTracked: Boolean(local.points),
+        saved: localSaved,
         models: models.core,
         aiState,
         provider: local.provider,

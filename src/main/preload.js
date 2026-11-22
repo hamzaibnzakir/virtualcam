@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('vcam', {
           installCamera: process.env.VCAM_SMOKE_INSTALL_CAMERA === '1',
           downloadModels: process.env.VCAM_SMOKE_DOWNLOAD === '1',
           liteOut: process.env.VCAM_SMOKE_LITE_OUT || '',
+          localOut: process.env.VCAM_SMOKE_LOCAL_OUT || '',
         }
       : null,
 
