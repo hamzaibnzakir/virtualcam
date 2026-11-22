@@ -14,71 +14,70 @@ Downloading Electron binary...
       "step": "webcam",
       "fps": 30,
       "ready": false,
-      "message": "No camera found.",
+      "message": "Camera is busy in another app.",
       "pixel": [
         16,
-        58,
-        122
+        18,
+        24
       ]
     },
     {
       "step": "ai-without-key",
       "aiState": "needs-key",
-      "fps": 30,
-      "ready": false,
-      "message": "No camera found.",
+      "fps": 25,
+      "ready": true,
+      "message": "",
       "pixel": [
-        16,
-        58,
-        122
+        7,
+        24,
+        20
       ]
     },
     {
       "step": "card",
-      "fps": 30,
+      "fps": 19,
       "ready": true,
       "message": "",
       "pixel": [
-        230,
         231,
+        232,
         234
       ]
     },
     {
       "step": "panic",
       "override": true,
-      "fps": 30,
-      "ready": false,
-      "message": "No camera found.",
+      "fps": 29,
+      "ready": true,
+      "message": "",
       "pixel": [
-        16,
-        58,
-        122
+        221,
+        239,
+        224
       ]
     },
     {
       "step": "new-scene-nametag",
       "scenes": 6,
-      "fps": 30,
-      "ready": false,
-      "message": "No camera found.",
+      "fps": 20,
+      "ready": true,
+      "message": "",
       "pixel": [
-        16,
-        58,
-        122
+        213,
+        245,
+        213
       ]
     },
     {
       "step": "output-window",
       "open": true
     },
-SMOKE FAILED
     {
       "step": "camera-device",
       "supported": true,
-      "installed": false,
-      "running": false,
-      "inUse": false,
+      "installed": true,
+      "running": true,
+      "inUse": true,
       "message": "",
       "buttonHidden": false
     },
@@ -86,46 +85,70 @@ SMOKE FAILED
       "step": "ai-bad-key",
       "aiState": "error",
       "toast": "Could not start AI: Invalid API key",
-      "fps": 30,
-      "ready": false,
-      "message": "No camera found.",
+      "fps": 11,
+      "ready": true,
+      "message": "",
       "pixel": [
-        16,
-        58,
-        122
+        210,
+        247,
+        210
       ]
-    },
-    {
-      "step": "camera-permission",
-      "error": "NotFoundError"
     },
     {
       "step": "camera-loopback",
       "installed": true,
       "running": true,
-      "listed": false,
-      "cameras": []
+      "listed": true,
+      "cameras": [
+        "VirtualCam"
+      ],
+      "size": "1280x720",
+      "pixel": [
+        32,
+        200,
+        101
+      ],
+      "inUse": true,
+      "ok": true
+    },
+    {
+      "step": "lite-warp",
+      "aiState": "generating",
+      "delegate": "GPU",
+      "faceFound": true,
+      "frames": 11,
+      "ms": 201,
+      "fps": 4
     },
     {
       "step": "model-download",
       "ok": true,
-      "seconds": 8
+      "seconds": 96
     },
     {
       "step": "local-swap",
       "models": true,
       "aiState": "generating",
       "provider": "cpu",
+      "gpuFallback": "dml: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FF978ABA880: (caller: 00007FF978ABAB8A) Exception(1) tid(1ff8) C0262002 Specified display adapter handle is invalid.\r\n",
       "swapped": true,
       "live": true,
       "meanFaceChange": 8,
-      "ms": 2292,
+      "ms": 12812,
       "hardware": "cpu-only"
     }
   ],
-  "ok": false,
-  "error": "the VirtualCam camera did not show the studio picture"
+  "ok": true
 }
 Quick switcher: [switcher] rows=5
+Console warnings: [
+  'W1122 06:41:20.960000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1122 06:41:21.024999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 06:41:21.268000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1122 06:41:21.292000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 06:41:21.430000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1122 06:41:21.457999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.'
+]
+SMOKE PASSED
 
-RESULT smoke=failure installer=skipped
+RESULT smoke=success installer=success
