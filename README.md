@@ -43,6 +43,10 @@ Drop a photo anywhere on the window (or click the photo box) and turn on **AI tr
 
 The Lite engine follows the classic no-generative-AI recipe. It tracks 478 face points with MediaPipe (a small model built for this) and smooths them with a one-euro filter. It warps the photo onto your face with a fixed triangle mesh built once from the photo, cut out around your eyes and mouth. A WebGL shader then matches colour in LAB space, takes the room's shading and your skin highlights from the camera (frequency separation), feathers the edges, and fades the parts of the face that either face shows turned away. A segmentation model reads the photo once, so its hair and background stay off your face (its glasses stay, as part of how that person looks). `scripts/bench/` measures it against the Local AI engine on test pairs of AI-generated faces.
 
+The Local AI engine uses the same tracker. Every frame, the studio tracks your face and, whenever the AI is free, sends it only an aligned 128-pixel crop of it. The swapped face that comes back is bent onto where your face is now with the tracker's mesh, so movement stays at camera speed even when one swap takes a few hundred ms. Your own mouth opening stays live. The engine tries each graphics chip and the processor, then keeps the fastest. `face-engine.log` in the app's logs folder records each step.
+
+Both tracking engines can also copy the photo's **hair** and **outfit**, without generative AI. The photo's hair and clothes are cut out once with a segmentation model. The hair is placed on your head from the tracker, and the clothes are stretched over yours, kept inside the outline of your clothes. The cloud engine redraws face, hair and clothes together instead.
+
 The app checks your graphics card and says whether local AI will run well. If AI stops or drops, the real picture shows instead. It never goes black. Your **voice is never touched**: VirtualCam is video only, so your microphone goes straight to the call.
 
 ## Everyday use
