@@ -1,21 +1,25 @@
-VirtualCam Windows camera test - 2026-11-22 06:13:36
-[06:13:36] Windows: Microsoft Windows Server 2025 Datacenter build 26100
-[06:13:36] deps of softcam.dll (x64): Dump of file D:\a\virtualcam\virtualcam\out\x64\softcam.dll, KERNEL32.dll, ole32.dll, WINMM.dll, ADVAPI32.dll
-[06:13:36] PASS: softcam.dll runs without extra runtimes
-[06:13:36] deps of vcam-bridge.exe (x64): KERNEL32.dll
-[06:13:36] PASS: vcam-bridge.exe runs without extra runtimes
-[06:13:36] deps of softcam.dll (x86): Dump of file D:\a\virtualcam\virtualcam\out\x86\softcam.dll, KERNEL32.dll, ole32.dll, WINMM.dll, ADVAPI32.dll
-[06:13:36] PASS: softcam.dll runs without extra runtimes
-[06:13:37] PASS: 64-bit camera registered
-[06:13:37] PASS: 32-bit camera registered
-[06:13:37] PASS: 64-bit class registered
-[06:13:37] PASS: 32-bit class registered
-[06:13:37] PASS: ffmpeg lists the VirtualCam camera
-[06:13:39] pattern frame centre: 30,200,10
-[06:13:39] PASS: camera shows the test colour (30,200,10)
-[06:13:40] bridge said: ready | connected
-[06:13:44] stdin frame centre: 200,30,10
-[06:13:44] PASS: frames piped from the app reach the camera (200,30,10)
-[06:13:58] bridge said: ready | connected | disconnected
-[06:13:58] PASS: 64-bit camera unregistered
-[06:13:58] ALL TESTS PASSED
+VirtualCam Windows camera test - 2026-11-22 07:37:32
+[07:37:32] Windows: Microsoft Windows Server 2025 Datacenter build 26100
+[07:37:32] deps of softcam.dll (x64): Dump of file D:\a\virtualcam\virtualcam\out\x64\softcam.dll, KERNEL32.dll, ole32.dll, WINMM.dll, ADVAPI32.dll
+[07:37:32] PASS: softcam.dll runs without extra runtimes
+[07:37:32] deps of vcam-bridge.exe (x64): KERNEL32.dll
+[07:37:32] PASS: vcam-bridge.exe runs without extra runtimes
+[07:37:32] deps of softcam.dll (x86): Dump of file D:\a\virtualcam\virtualcam\out\x86\softcam.dll, KERNEL32.dll, ole32.dll, WINMM.dll, ADVAPI32.dll
+[07:37:32] PASS: softcam.dll runs without extra runtimes
+[07:37:32] PASS: 64-bit camera registered
+[07:37:33] PASS: 32-bit camera registered
+[07:37:33] PASS: 64-bit class registered
+[07:37:33] PASS: 32-bit class registered
+[07:37:33] PASS: ffmpeg lists the VirtualCam camera
+[07:37:35] pattern frame centre: 30,200,10
+[07:37:35] PASS: camera shows the test colour (30,200,10)
+[07:37:36] bridge said: ready | connected
+[07:37:39] stdin frame centre: 200,30,10
+[07:37:39] PASS: frames piped from the app reach the camera (200,30,10)
+[07:37:54] bridge said: ready | connected | disconnected
+[07:37:56] portrait stream size reported: 720x1280
+[07:37:56] portrait frame bytes: 2764800 (expected 2764800)
+[07:37:56] portrait frame centre: 220,40,160
+[07:37:56] PASS: portrait camera delivers 720x1280 frames
+[07:37:58] PASS: 64-bit camera unregistered
+[07:37:58] ALL TESTS PASSED

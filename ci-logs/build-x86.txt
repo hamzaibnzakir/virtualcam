@@ -11,8 +11,8 @@
   dllsetup.cpp
   mtype.cpp
   source.cpp
-  winutil.cpp
   softcamcore.vcxproj -> D:\a\virtualcam\virtualcam\native\softcam\src\softcamcore\Win32\Release\softcamcore.lib
+  winutil.cpp
   wxdebug.cpp
   wxlist.cpp
   wxutil.cpp
