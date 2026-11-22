@@ -244,6 +244,7 @@ async function runMotion(lite, pair, img, index, noise, r) {
 }
 
 async function run() {
+  const defaults = { ...liteTuning };
   Object.assign(liteTuning, config.params || {});
   const lite = new LiteFaceAI({ api, onState: () => {}, onError: (m) => console.warn(`lite: ${m}`) });
   const results = [];
@@ -288,7 +289,25 @@ async function run() {
       }
       r.faceFound = lite.faceFound;
       r.renderMs = Math.round(times[times.length - 1]);
+      r.camGlasses = [lite.camGlassesScore, lite.camGlasses];
       fs.writeFileSync(path.join(config.outDir, `${pair.target}.out.rgba`), Buffer.from(rgbaOf(lite.canvas).buffer));
+      // Sweep (tuning aid): re-render the same tracked points with each parameter set.
+      if (config.sweep && lite.faceFound) {
+        const points = Float32Array.from(lite.smoother.x);
+        r.sweepMs = [];
+        for (let k = 0; k < config.sweep.length; k += 1) {
+          Object.assign(liteTuning, defaults, config.params || {}, config.sweep[k]);
+          lite.source = await lite.prepareSource(refBlob);
+          if (!lite.source) continue;
+          lite.dstStats = null;
+          const t0 = performance.now();
+          lite.updateDstStats(points);
+          lite.render(points);
+          r.sweepMs.push(Math.round(performance.now() - t0));
+          fs.writeFileSync(path.join(config.outDir, `${pair.target}.out.${k}.rgba`), Buffer.from(rgbaOf(lite.canvas).buffer));
+        }
+        Object.assign(liteTuning, defaults, config.params || {});
+      }
     }
     r.totalMs = Math.round(performance.now() - started);
     results.push(r);
