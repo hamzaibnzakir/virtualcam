@@ -723,7 +723,7 @@ function bindEvents() {
     scheduleSave();
     await syncCamera();
     if (cameraState.installed && state.settings.cameraOutput) {
-      showToast('Picture shape changed. If a call is already using VirtualCam, pick the camera again there.');
+      showToast('Picture shape changed. In an open call, pick VirtualCam again; in Chrome or Meet, reload the page.');
     }
   });
 
@@ -1173,6 +1173,9 @@ async function runSmokeTest() {
       if (cameraState.supported && cameraState.installed) {
         const until2 = Date.now() + 15000;
         while (Date.now() < until2 && !(cameraState.running && cameraState.width === 720)) await wait(250);
+        // What matters: the camera itself now sends 720x1280 (the driver test captures it fresh).
+        portraitStep.bridge = `${cameraState.width}x${cameraState.height}`;
+        portraitStep.ok = portraitStep.ok && cameraState.running && cameraState.width === 720 && cameraState.height === 1280;
         const devices = await navigator.mediaDevices.enumerateDevices();
         const vc = devices.find((d) => d.kind === 'videoinput' && /virtualcam/i.test(d.label));
         if (vc) {
@@ -1183,13 +1186,10 @@ async function runSmokeTest() {
           $('stage').append(video);
           await video.play();
           await wait(2500);
-          portraitStep.camera = `${video.videoWidth}x${video.videoHeight}`;
+          // Informational: Chromium keeps the sizes it learned at startup until a device change.
+          portraitStep.chromiumSees = `${video.videoWidth}x${video.videoHeight}`;
           stream.getTracks().forEach((t) => t.stop());
           video.remove();
-          portraitStep.ok = portraitStep.ok && video.videoWidth === 720 && video.videoHeight === 1280;
-        } else {
-          portraitStep.ok = false;
-          portraitStep.camera = 'not listed';
         }
       }
       report.steps.push(portraitStep);

@@ -90,7 +90,27 @@ if (Near $rgb 200 30 10) { Pass "frames piped from the app reach the camera (200
 $feed | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
 Log ("bridge said: " + ((Get-Content "$env:TEMP\bridge2.txt" -ErrorAction SilentlyContinue) -join ' | '))
 
-# --- 5. unregister cleanly ---
+# --- 5. portrait: a 720x1280 camera, captured at its own size (no rescaling) ---
+$bridge = Start-Process -FilePath "$Bin\x64\vcam-bridge.exe" -ArgumentList "720 1280 --test-pattern 220 40 160 20" -PassThru -NoNewWindow -RedirectStandardOutput "$env:TEMP\bridge3.txt"
+Start-Sleep -Seconds 2
+$raw = Join-Path $env:TEMP 'portrait.raw'
+Remove-Item $raw -ErrorAction SilentlyContinue
+$out = & ffmpeg -hide_banner -loglevel error -f dshow -i 'video=VirtualCam' -frames:v 1 -pix_fmt rgb24 -f rawvideo -y $raw 2>&1
+if ($out) { Log "ffmpeg: $out" }
+$info = (& ffmpeg -hide_banner -f dshow -i 'video=VirtualCam' -frames:v 1 -f null - 2>&1) -join ' '
+if ($info -match '(\d{3,4})x(\d{3,4})') { Log "portrait stream size reported: $($Matches[0])" }
+if (Test-Path $raw) {
+  $bytes = [System.IO.File]::ReadAllBytes($raw)
+  Log "portrait frame bytes: $($bytes.Length) (expected $(720 * 1280 * 3))"
+  $i = ((1280 / 2) * 720 + (720 / 2)) * 3
+  $rgb = @($bytes[$i], $bytes[$i + 1], $bytes[$i + 2])
+  Log ("portrait frame centre: " + ($rgb -join ','))
+  if ($bytes.Length -eq 720 * 1280 * 3 -and (Near $rgb 220 40 160)) { Pass "portrait camera delivers 720x1280 frames" } else { Fail "portrait camera size or colour wrong" }
+} else { Fail "no portrait frame captured" }
+Stop-Process -Id $bridge.Id -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
+
+# --- 6. unregister cleanly ---
 $p = Start-Process -FilePath "$env:WINDIR\System32\regsvr32.exe" -ArgumentList '/s', '/u', "`"$Bin\x64\softcam.dll`"" -Wait -PassThru
 if ($p.ExitCode -eq 0) { Pass "64-bit camera unregistered" } else { Fail "unregister exit code $($p.ExitCode)" }
 

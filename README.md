@@ -51,7 +51,7 @@ The app checks your graphics card and says whether local AI will run well. If AI
 - **Panic:** **Ctrl + Alt + 0**, or the red button, goes straight back to your plain camera.
 - **Quick switcher:** **Ctrl + Alt + Space**.
 - **Video loop / image / screen / text card:** choose them under **Source**.
-- **Picture shape** (top bar): **Landscape 1280×720** for calls, or **Portrait 720×1280** for phone-style video (TikTok, Reels, recordings). Every engine and the camera follow it. In calls, most apps show a portrait camera with bars at the sides.
+- **Picture shape** (top bar): **Landscape 1280×720** for calls, or **Portrait 720×1280** for phone-style video (TikTok, Reels, recordings). Every engine and the camera follow it. In calls, most apps show a portrait camera with bars at the sides. If you switch shape while a call is open, pick VirtualCam again in that app (in Chrome or Meet, reload the page), because apps remember a camera's size from when they started.
 - **Show the whole picture** (per scene): no cropping. Leftover space gets a soft blurred fill, so a portrait phone camera fits in a landscape call without cutting off your head.
 - **Name tag:** an on-screen name and title.
 - **Output window:** a clean 1280×720 window for OBS, or for Mac and Linux where the camera device isn't available yet.
