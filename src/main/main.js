@@ -436,7 +436,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('smoke:save', async (_e, filePath, bytes) => {
-    if (!SMOKE || typeof filePath !== 'string' || ![process.env.VCAM_SMOKE_LITE_OUT, process.env.VCAM_SMOKE_LOCAL_OUT].filter(Boolean).includes(filePath)) return false;
+    if (!SMOKE || typeof filePath !== 'string' || ![process.env.VCAM_SMOKE_LITE_OUT, process.env.VCAM_SMOKE_LOCAL_OUT, process.env.VCAM_SMOKE_LOOK_OUT].filter(Boolean).includes(filePath)) return false;
     await fs.promises.writeFile(filePath, Buffer.from(bytes));
     return true;
   });

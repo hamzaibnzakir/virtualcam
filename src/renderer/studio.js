@@ -2,6 +2,7 @@
 import { DecartAI } from './engine/ai-decart.js';
 import { LiteFaceAI } from './engine/ai-lite.js';
 import { LocalFaceAI } from './engine/ai-local.js';
+import { LookLayers } from './engine/look-layers.js';
 import { Compositor } from './engine/compositor.js';
 import { SourceManager } from './engine/sources.js';
 import {
@@ -92,9 +93,35 @@ const lite = new LiteFaceAI({
 });
 
 // The local engines grab frames as they are drawn; the camera driver takes each finished frame.
+// Hair and outfit from the photo, shared by the Lite and Local engines.
+const look = new LookLayers(api);
+local.look = look;
+let lookWanted = { hair: false, outfit: false };
+// Lite draws with WebGL; with hair or outfit on, its picture is copied here and they are added on top.
+const liteView = document.createElement('canvas');
+const liteViewCtx = liteView.getContext('2d', { alpha: false });
+
+let liteUsesView = false;
+
+function composeLite() {
+  if (!liteUsesView) return;
+  const w = lite.canvas.width;
+  const h = lite.canvas.height;
+  if (liteView.width !== w || liteView.height !== h) {
+    liteView.width = w;
+    liteView.height = h;
+  }
+  liteViewCtx.drawImage(lite.canvas, 0, 0);
+  if (lookWanted.outfit) look.drawOutfit(liteViewCtx, lite.input, w, h, performance.now(), lite.points);
+  if (lookWanted.hair && lite.points) look.drawHair(liteViewCtx, lite.points, lite.smoother.strength);
+}
+
 compositor.beforeRender = (drawSource) => {
   if (activeEngine === 'local') local.tick(drawSource);
-  else if (activeEngine === 'lite') lite.tick(drawSource);
+  else if (activeEngine === 'lite') {
+    lite.tick(drawSource);
+    composeLite();
+  }
 };
 compositor.afterRender = (canvas) => sendCameraFrame(canvas);
 
@@ -160,7 +187,10 @@ async function applyScene() {
   compositor.aiFeed = engine === 'cloud';
   if (engine === 'cloud') compositor.setAiSource(aiVideo, () => cloudState === 'generating');
   else if (engine === 'local') compositor.setAiSource(local.canvas, () => local.live);
-  else if (engine === 'lite') compositor.setAiSource(lite.canvas, () => lite.live);
+  else if (engine === 'lite') {
+    liteUsesView = scene.ai.lookHair || scene.ai.lookOutfit;
+    compositor.setAiSource(liteUsesView ? liteView : lite.canvas, () => lite.live);
+  }
   else compositor.setAiSource(null);
   renderAll();
 
@@ -180,6 +210,24 @@ async function applyScene() {
     }
   }
   if (token !== applyToken) return; // user moved on while the image loaded
+
+  // Hair and outfit from the photo (Lite and Local only; the cloud engine redraws everything itself).
+  const wantLook = (engine === 'lite' || engine === 'local') && refBlob && (scene.ai.lookHair || scene.ai.lookOutfit);
+  lookWanted = { hair: false, outfit: false };
+  local.lookOpts = lookWanted;
+  if (wantLook) {
+    look
+      .preparePhoto(refKey, refBlob, { outfit: scene.ai.lookOutfit })
+      .then((found) => {
+        if (token !== applyToken) return;
+        lookWanted = { hair: scene.ai.lookHair && look.hasHair, outfit: scene.ai.lookOutfit && look.hasOutfit };
+        local.lookOpts = lookWanted;
+        if (scene.ai.lookHair && found && !look.hasHair) showToast('No hair found in that photo to copy.');
+        if (scene.ai.lookOutfit && found && !look.hasOutfit) showToast('No clothes found in that photo to copy. A photo showing the shoulders and chest works best.');
+        renderAi();
+      })
+      .catch((err) => showToast(`Hair and outfit: ${(err && err.message) || err}`, true));
+  }
 
   if (engine === 'local') {
     local.setTarget({ refKey, refBlob, enhance: state.settings.faceBoost });
@@ -309,6 +357,10 @@ function renderInspector() {
   $('ai-mode').value = scene.ai.referencePath ? 'edit' : scene.ai.mode;
   $('ai-mode').disabled = Boolean(scene.ai.referencePath);
   setPressed($('toggle-enhance'), scene.ai.enhance);
+  $('look-group').hidden = !(scene.ai.engine === 'lite' || scene.ai.engine === 'local');
+  $('cloud-look-note').hidden = scene.ai.engine !== 'cloud';
+  setPressed($('toggle-look-hair'), scene.ai.lookHair);
+  setPressed($('toggle-look-outfit'), scene.ai.lookOutfit);
 
   setPressed($('toggle-nametag'), scene.nameTag.enabled);
   syncField($('tag-name'), scene.nameTag.name, sceneChanged);
@@ -815,6 +867,14 @@ function bindEvents() {
   });
   $('btn-models').addEventListener('click', () => startDownload('core'));
   $('btn-engine-log').addEventListener('click', () => api.showEngineLog());
+  $('toggle-look-hair').addEventListener('click', () => {
+    activeScene().ai.lookHair = !activeScene().ai.lookHair;
+    changed();
+  });
+  $('toggle-look-outfit').addEventListener('click', () => {
+    activeScene().ai.lookOutfit = !activeScene().ai.lookOutfit;
+    changed();
+  });
   $('btn-boost-download').addEventListener('click', () => startDownload('boost'));
   $('toggle-boost').addEventListener('click', () => {
     if (!state.settings.faceBoost && !models.boost) {
@@ -1168,6 +1228,21 @@ async function runSmokeTest() {
         tried: local.tried,
       });
       if (!(local.lastResultAt > 0)) failures.push('local face swap produced no result');
+
+      // Hair and outfit from the photo on top of the local swap.
+      activeScene().ai.lookHair = true;
+      activeScene().ai.lookOutfit = true;
+      changed();
+      const lookUntil = Date.now() + 60000;
+      while (Date.now() < lookUntil && !(lookWanted.hair || lookWanted.outfit)) await wait(250);
+      await wait(1500);
+      const lookStep = { step: 'look', photoRead: Boolean(look.photo), hair: look.hasHair, outfit: look.hasOutfit, wanted: { ...lookWanted }, cameraClothes: Boolean(look.camBox), measured: look.measured, camRuns: look.camRuns, camError: look.camError, camFound: look.camFound, camOn: look.camOn, camSize: look.camSize, camBox: look.camBox, photoBox: look.photo && look.photo.clothesBox, videoSeg: Boolean(look.videoSeg) };
+      if (api.smokeFiles.lookOut) {
+        const png = await new Promise((r) => local.canvas.toBlob(r, 'image/png'));
+        lookStep.saved = await api.smokeSave(api.smokeFiles.lookOut, new Uint8Array(await png.arrayBuffer()));
+      }
+      report.steps.push(lookStep);
+      if (!look.photo) failures.push('hair/outfit: the photo could not be read');
     }
 
 
