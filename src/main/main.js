@@ -9,12 +9,18 @@ const {
   ipcMain,
   safeStorage,
   screen,
+  MessageChannelMain,
   session,
   shell,
+  utilityProcess,
 } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+const { checkHardware } = require('./hardware');
+const { Downloader, status: modelStatus } = require('./models');
+const { CameraDriver } = require('./camera-driver');
 
 const SMOKE = process.env.VCAM_SMOKE === '1';
 const DIST = path.join(__dirname, '..', '..', 'dist');
@@ -22,8 +28,8 @@ const PRELOAD = path.join(__dirname, 'preload.js');
 const MAX_FILE_BYTES = 512 * 1024 * 1024;
 
 if (SMOKE) {
-  // Headless test run: fake camera, auto-accept prompts, throwaway profile.
-  app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+  // Headless test run: fake camera (unless testing real devices), auto-accept prompts, throwaway profile.
+  if (process.env.VCAM_SMOKE_REAL_DEVICES !== '1') app.commandLine.appendSwitch('use-fake-device-for-media-stream');
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
   app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'vcam-smoke-')));
 }
@@ -37,6 +43,20 @@ let switcherWindow = null;
 let sceneSnapshot = { scenes: [], activeId: null };
 const hotkeyFailures = [];
 const smokeLog = [];
+let faceWorker = null;
+let hardwareCache = null;
+let downloader = null;
+let camera = null;
+
+function modelsDir() {
+  return process.env.VCAM_MODELS_DIR || path.join(app.getPath('userData'), 'models');
+}
+
+// Camera files ship in resources/vendor/win when packaged, and in the repo's vendor/win in development.
+function vendorDir() {
+  const packaged = path.join(process.resourcesPath || '', 'vendor', 'win');
+  return app.isPackaged ? packaged : path.join(__dirname, '..', '..', 'vendor', 'win');
+}
 
 // ---------- files in userData ----------
 
@@ -305,6 +325,71 @@ function registerIpc() {
   });
   ipcMain.on('switcher:close', () => hideSwitcher());
 
+  // ---------- local face engine ----------
+  ipcMain.handle('faceengine:start', () => {
+    if (!mainWindow) return { ok: false };
+    if (!faceWorker) {
+      faceWorker = utilityProcess.fork(path.join(__dirname, 'faceswap', 'worker.js'), [], {
+        serviceName: 'VirtualCam Face Engine',
+        stdio: 'ignore',
+      });
+      const worker = faceWorker;
+      worker.on('exit', (code) => {
+        if (faceWorker === worker) faceWorker = null;
+        sendToStudio('faceengine:exit', { code });
+      });
+    }
+    // A fresh channel each time the studio asks, so a reloaded window can reconnect.
+    const { port1, port2 } = new MessageChannelMain();
+    faceWorker.postMessage({ type: 'port' }, [port1]);
+    mainWindow.webContents.postMessage('faceengine:port', null, [port2]);
+    return { ok: true, modelsDir: modelsDir() };
+  });
+
+  ipcMain.handle('faceengine:stop', () => {
+    if (faceWorker) faceWorker.kill();
+    faceWorker = null;
+    return true;
+  });
+
+  ipcMain.handle('hardware:check', async () => {
+    if (!hardwareCache) hardwareCache = await checkHardware(app);
+    return hardwareCache;
+  });
+
+  ipcMain.handle('models:status', () => ({ ...modelStatus(modelsDir()), busy: Boolean(downloader && downloader.busy) }));
+
+  ipcMain.handle('models:download', async (_e, pack) => {
+    if (pack !== 'core' && pack !== 'boost') throw new Error('Unknown model pack');
+    if (!downloader) downloader = new Downloader(modelsDir());
+    let lastSent = 0;
+    return downloader.download(pack, (p) => {
+      const now = Date.now();
+      if (now - lastSent > 200 || p.done === p.total) {
+        lastSent = now;
+        sendToStudio('models:progress', { pack, ...p });
+      }
+    });
+  });
+
+  ipcMain.handle('models:cancel', () => {
+    if (downloader) downloader.cancel();
+    return true;
+  });
+
+  // ---------- VirtualCam camera device (Windows) ----------
+  ipcMain.handle('camera:status', () => camera.refresh());
+  ipcMain.handle('camera:install', () => camera.setInstalled(true));
+  ipcMain.handle('camera:uninstall', () => camera.setInstalled(false));
+  ipcMain.handle('camera:start', (_e, width, height) => camera.start(Number(width), Number(height)));
+  ipcMain.handle('camera:stop', () => {
+    camera.stop();
+    return true;
+  });
+  ipcMain.on('camera:frame', (_e, frame) => {
+    if (frame && frame.byteLength) camera.sendFrame(frame);
+  });
+
   ipcMain.on('smoke:report', async (_e, report) => {
     if (!SMOKE) return;
     const out = process.env.VCAM_SMOKE_OUT || path.join(os.tmpdir(), 'vcam-smoke.json');
@@ -347,6 +432,7 @@ app.whenReady().then(() => {
     }
   });
 
+  camera = new CameraDriver({ binDir: vendorDir(), onState: (state) => sendToStudio('camera:state', state) });
   registerIpc();
   registerHotkeys();
   createMainWindow();
@@ -358,7 +444,7 @@ app.whenReady().then(() => {
       const out = process.env.VCAM_SMOKE_OUT || path.join(os.tmpdir(), 'vcam-smoke.json');
       fs.writeFileSync(out, JSON.stringify({ report: { timeout: true }, console: smokeLog, hotkeyFailures }, null, 2));
       app.quit();
-    }, 70000);
+    }, 420000);
   }
 
   app.on('activate', () => {
@@ -368,6 +454,9 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  if (camera) camera.stop();
+  if (faceWorker) faceWorker.kill();
+  if (downloader) downloader.cancel();
 });
 
 app.on('window-all-closed', () => {

@@ -1,6 +1,6 @@
 // Draws the program picture (what everyone sees) at a steady frame rate,
 // plus the AI input picture when an AI scene is live.
-import { drawVideoCover } from './sources.js';
+import { drawAnyCover } from './sources.js';
 import { OUTPUT_FPS, OUTPUT_HEIGHT, OUTPUT_WIDTH } from './state.js';
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -57,9 +57,11 @@ export class Compositor {
 
     this.mirror = false;
     this.nameTag = null; // { name, title } or null
-    this.aiFeed = false; // keep drawing the AI input picture
-    this.aiVideo = null; // transformed video coming back from the AI
-    this.aiLive = false; // AI output is trustworthy right now
+    this.aiFeed = false; // keep drawing the cloud AI input picture
+    this.aiSource = null; // transformed picture: the cloud's video or the local engine's canvas
+    this.isAiLive = () => false; // AI output is trustworthy right now
+    this.beforeRender = null; // (drawSource) => void, lets the local engine grab frames
+    this.afterRender = null; // (canvas) => void, lets the camera driver take the finished frame
     this.aiInputStream = null;
     this.aiInputSize = null;
 
@@ -88,8 +90,9 @@ export class Compositor {
     return this.aiInputStream;
   }
 
-  setAiVideo(video) {
-    this.aiVideo = video;
+  setAiSource(el, isLive) {
+    this.aiSource = el;
+    this.isAiLive = isLive || (() => false);
   }
 
   start() {
@@ -123,15 +126,17 @@ export class Compositor {
     const h = OUTPUT_HEIGHT;
 
     if (this.aiFeed) this.drawAiInput();
+    if (this.beforeRender) this.beforeRender((c, cw, ch) => this.sources.draw(c, cw, ch, this.mirror));
 
     let drewAi = false;
-    if (this.aiLive && this.aiVideo) {
+    if (this.aiSource && this.isAiLive()) {
       // The AI already received a mirrored picture when mirroring is on.
-      drewAi = drawVideoCover(ctx, this.aiVideo, w, h, false);
+      drewAi = drawAnyCover(ctx, this.aiSource, w, h, false);
     }
     if (!drewAi) this.sources.draw(ctx, w, h, this.mirror);
 
     if (this.nameTag) drawNameTag(ctx, this.nameTag.name, this.nameTag.title);
+    if (this.afterRender) this.afterRender(this.canvas);
 
     this.frames += 1;
     const now = performance.now();

@@ -1,0 +1,83 @@
+name: App on Windows
+
+# Runs the whole app on a real Windows machine: installs the VirtualCam camera through the app,
+# reads it back like a video app would, downloads the AI models with the app's downloader and
+# runs a real local face swap. Then builds the Windows installer (download it from this run's page).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'vendor/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/app-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: app-windows
+  cancel-in-progress: true
+
+jobs:
+  test-and-package:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test faces (AI-generated, from the SFHQ sample on Hugging Face)
+        run: |
+          New-Item -ItemType Directory -Force ci-logs, testdata | Out-Null
+          Invoke-WebRequest -Uri https://huggingface.co/datasets/bitmind/SyntheticFacesHQ/resolve/main/tiny-sample.zip -OutFile testdata\faces.zip
+          Expand-Archive testdata\faces.zip -DestinationPath testdata\faces -Force
+          python -m pip install --quiet pillow
+          python -c "from PIL import Image; f=Image.new('RGB',(1280,720),(40,44,52)); t=Image.open(r'testdata\faces\SFHQ_pt3_00000058.jpg').convert('RGB').resize((560,560)); f.paste(t,(360,120)); f.save(r'testdata\frame.png')"
+
+      - name: App smoke test (camera loopback + model download + local face swap)
+        id: smoke
+        env:
+          VCAM_SMOKE_REAL_DEVICES: '1'
+          VCAM_SMOKE_INSTALL_CAMERA: '1'
+          VCAM_SMOKE_DOWNLOAD: '1'
+          VCAM_SMOKE_FACE: ${{ github.workspace }}\testdata\frame.png
+          VCAM_SMOKE_REF: ${{ github.workspace }}\testdata\faces\SFHQ_pt3_00000010.jpg
+          VCAM_SMOKE_SHOT: ${{ github.workspace }}\ci-logs\app-windows.png
+        run: npm run smoke 2>&1 | Tee-Object -FilePath ci-logs\app-windows.txt
+
+      - name: Build the Windows installer
+        id: dist
+        run: npx electron-builder --win nsis --publish never 2>&1 | Tee-Object -FilePath ci-logs\app-windows-build.txt
+
+      - name: Upload installer
+        if: steps.dist.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirtualCam-Windows-installer
+          path: release/*.exe
+          retention-days: 30
+
+      - name: Commit logs
+        if: always()
+        run: |
+          git config user.name "virtualcam-ci"
+          git config user.email "virtualcam-ci@users.noreply.github.com"
+          Add-Content ci-logs\app-windows.txt "`nRESULT smoke=${{ steps.smoke.outcome }} installer=${{ steps.dist.outcome }}"
+          git add ci-logs
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "App on Windows CI: smoke ${{ steps.smoke.outcome }}, installer ${{ steps.dist.outcome }} [skip ci]"
+            git pull --rebase
+            git push
+          }

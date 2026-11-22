@@ -25,7 +25,7 @@ if (process.platform === 'linux' && !process.env.DISPLAY && existsSync('/usr/bin
 const run = spawnSync(cmd, cmdArgs, {
   env: { ...process.env, VCAM_SMOKE: '1', VCAM_SMOKE_OUT: out },
   encoding: 'utf8',
-  timeout: 90000,
+  timeout: 480000,
 });
 
 if (!existsSync(out)) {

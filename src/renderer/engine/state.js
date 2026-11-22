@@ -6,6 +6,11 @@ export const OUTPUT_FPS = 30;
 
 export const SOURCE_TYPES = ['webcam', 'image', 'video', 'screen', 'card'];
 export const AI_MODES = ['restyle', 'edit'];
+export const AI_ENGINES = ['cloud', 'local'];
+
+// Used for the cloud AI when a reference photo is set and no look is typed.
+export const CHARACTER_PROMPT =
+  'Turn the person into the character from the reference image: same face, hair and outfit. Keep their movements and expressions.';
 
 export const PRESETS = [
   { id: 'anime', label: 'Anime', prompt: 'Anime style, clean line art, vibrant cel shading' },
@@ -27,7 +32,7 @@ export function makeScene(overrides = {}) {
     name: 'New scene',
     mirror: false,
     source: { type: 'webcam', deviceId: '', filePath: '', text: 'Be right back', color: '#1B1E27' },
-    ai: { enabled: false, mode: 'restyle', prompt: '', enhance: true, referencePath: '' },
+    ai: { enabled: false, engine: 'cloud', mode: 'restyle', prompt: '', enhance: true, referencePath: '' },
     nameTag: { enabled: false, name: '', title: '' },
   };
   return normalizeScene({
@@ -51,11 +56,19 @@ export function defaultState() {
       ai: { enabled: true, mode: 'edit', prompt: 'Replace the background with a bright, modern office. Keep the person unchanged.' },
     }),
     makeScene({
+      name: 'Become someone',
+      ai: { enabled: true, engine: 'local', mode: 'edit', prompt: '' },
+    }),
+    makeScene({
       name: 'Be right back',
       source: { type: 'card', text: 'Be right back', color: '#1B1E27' },
     }),
   ];
-  return { version: 1, scenes, activeId: scenes[0].id, settings: { pricePerSecond: 0 } };
+  return { version: 1, scenes, activeId: scenes[0].id, settings: defaultSettings() };
+}
+
+function defaultSettings() {
+  return { pricePerSecond: 0, faceBoost: false, cameraOutput: true };
 }
 
 function str(value, fallback = '', max = 2000) {
@@ -84,6 +97,7 @@ export function normalizeScene(raw) {
     },
     ai: {
       enabled: Boolean(ai.enabled),
+      engine: AI_ENGINES.includes(ai.engine) ? ai.engine : 'cloud',
       mode: AI_MODES.includes(ai.mode) ? ai.mode : 'restyle',
       prompt: str(ai.prompt, '', 1000),
       enhance: ai.enhance !== false,
@@ -109,12 +123,18 @@ export function normalizeState(raw) {
   });
   if (scenes.length === 0) return defaultState();
   const activeId = scenes.some((s) => s.id === raw.activeId) ? raw.activeId : scenes[0].id;
-  const price = Number(raw.settings && raw.settings.pricePerSecond);
+  const rawSettings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
+  const price = Number(rawSettings.pricePerSecond);
   return {
     version: 1,
     scenes,
     activeId,
-    settings: { pricePerSecond: Number.isFinite(price) && price >= 0 ? price : 0 },
+    settings: {
+      ...defaultSettings(),
+      pricePerSecond: Number.isFinite(price) && price >= 0 ? price : 0,
+      faceBoost: Boolean(rawSettings.faceBoost),
+      cameraOutput: rawSettings.cameraOutput !== false,
+    },
   };
 }
 
@@ -125,7 +145,14 @@ export function sourceLabel(type) {
 export function sceneKind(scene) {
   const base = sourceLabel(scene.source.type);
   if (!scene.ai.enabled) return base;
-  return `${base} + AI ${scene.ai.mode === 'edit' ? 'edit' : 'restyle'}`;
+  if (scene.ai.engine === 'local') return `${base} + local face swap`;
+  if (scene.ai.referencePath) return `${base} + cloud character`;
+  return `${base} + cloud ${scene.ai.mode === 'edit' ? 'edit' : 'restyle'}`;
+}
+
+// Phone cameras show up as ordinary webcams; their names give them away.
+export function isPhoneCamera(label) {
+  return /camo|iphone|ipad|droidcam|ivcam|epoccam|iriun|android|pixel|galaxy|phone|continuity/i.test(label || '');
 }
 
 export function fileName(filePath) {

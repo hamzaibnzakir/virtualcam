@@ -24,6 +24,14 @@ export function drawVideoCover(ctx, video, w, h, mirror = false) {
   return drawCover(ctx, video, video.videoWidth, video.videoHeight, w, h, mirror);
 }
 
+// Video, canvas or image: fills w x h, cropping the overflow.
+export function drawAnyCover(ctx, el, w, h, mirror = false) {
+  if (!el) return false;
+  if (el instanceof HTMLVideoElement) return drawVideoCover(ctx, el, w, h, mirror);
+  if (el instanceof HTMLCanvasElement) return drawCover(ctx, el, el.width, el.height, w, h, mirror);
+  return drawCover(ctx, el, el.naturalWidth, el.naturalHeight, w, h, mirror);
+}
+
 function wrapLines(ctx, text, maxWidth) {
   const words = text.split(/\s+/).filter(Boolean);
   const lines = [];

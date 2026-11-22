@@ -19,6 +19,7 @@
     <div class="pill" id="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">Starting…</span></div>
     <div class="spacer"></div>
     <span class="muted">1280×720 · 30 fps</span>
+    <button type="button" class="btn" id="btn-camera" hidden>Install VirtualCam camera</button>
     <button type="button" class="btn" id="btn-output">Open output window</button>
     <button type="button" class="btn btn-danger" id="btn-panic">Back to real camera <kbd id="kbd-panic">Ctrl Alt 0</kbd></button>
     <button type="button" class="icon-btn" id="btn-settings" aria-label="Settings">
@@ -55,9 +56,10 @@
         <canvas id="program" aria-label="Live output preview"></canvas>
         <div class="preview-badge" id="scene-badge">Scene</div>
         <div class="preview-badge right" id="override-badge" hidden>Real camera</div>
+        <div class="drop-overlay" id="drop-overlay" hidden>Drop the photo to become this person</div>
       </div>
 
-      <div class="field">
+      <div class="field" id="look-field">
         <label for="prompt">Describe the look</label>
         <div class="row">
           <input id="prompt" type="text" maxlength="1000" placeholder="e.g. anime style, soft studio lighting, keep my face" autocomplete="off">
@@ -65,7 +67,7 @@
         </div>
       </div>
 
-      <div class="field">
+      <div class="field" id="styles-field">
         <span class="label">Quick styles</span>
         <div class="presets" id="presets"></div>
       </div>
@@ -76,8 +78,8 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>
           </span>
           <span class="ref-text">
-            <span class="strong" id="ref-title">Add a reference image</span>
-            <span class="muted small" id="ref-sub">Optional. The AI turns you into the person or character in the photo</span>
+            <span class="strong" id="ref-title">Drop a photo or click to choose</span>
+            <span class="muted small" id="ref-sub">The AI turns you into the person in the photo, following your moves</span>
           </span>
         </button>
         <button type="button" class="btn" id="btn-ref-clear" hidden>Remove</button>
@@ -107,6 +109,7 @@
         <div class="source-detail" id="detail-webcam">
           <label for="camera-select">Camera</label>
           <select id="camera-select"></select>
+          <button type="button" class="link-btn" id="btn-phone-help">Use your phone as the camera</button>
         </div>
         <div class="source-detail" id="detail-file" hidden>
           <span class="label" id="file-label">File</span>
@@ -136,19 +139,42 @@
           <h3 id="ai-label">AI transform</h3>
           <button type="button" class="switch" id="toggle-ai" aria-labelledby="ai-label"><span></span></button>
         </div>
-        <label for="ai-provider">Provider</label>
-        <select id="ai-provider">
-          <option value="decart">Decart · live video</option>
+        <label for="ai-engine">Engine</label>
+        <select id="ai-engine">
+          <option value="local">Local · face swap · free</option>
+          <option value="cloud">Cloud · face and clothes · Decart</option>
         </select>
-        <label for="ai-mode">Mode</label>
-        <select id="ai-mode">
-          <option value="restyle">Restyle me</option>
-          <option value="edit">Edit scene or become a character</option>
-        </select>
-        <div class="toggle-row">
-          <span id="enhance-label">Let AI improve my prompt</span>
-          <button type="button" class="switch" id="toggle-enhance" aria-labelledby="enhance-label"><span></span></button>
+
+        <div class="engine-group" id="cloud-group">
+          <label for="ai-mode">Mode</label>
+          <select id="ai-mode">
+            <option value="restyle">Restyle me</option>
+            <option value="edit">Edit scene or become a character</option>
+          </select>
+          <div class="toggle-row">
+            <span id="enhance-label">Let AI improve my prompt</span>
+            <button type="button" class="switch" id="toggle-enhance" aria-labelledby="enhance-label"><span></span></button>
+          </div>
         </div>
+
+        <div class="engine-group" id="local-group" hidden>
+          <div class="muted small" id="hw-line">Checking your computer…</div>
+          <div class="models-row">
+            <span class="small" id="models-line">Checking models…</span>
+            <button type="button" class="btn btn-small" id="btn-models" hidden>Download</button>
+          </div>
+          <div class="progress" id="models-progress" hidden><span id="models-bar"></span></div>
+          <div class="toggle-row">
+            <span id="boost-label">Face detail boost <span class="muted small">(sharper, slower)</span></span>
+            <button type="button" class="switch" id="toggle-boost" aria-labelledby="boost-label"><span></span></button>
+          </div>
+          <div class="models-row" id="boost-row" hidden>
+            <span class="small muted" id="boost-line">Needs a one-time download</span>
+            <button type="button" class="btn btn-small" id="btn-boost-download">Download</button>
+          </div>
+          <div class="muted small" id="local-stats"></div>
+        </div>
+
         <div class="ai-status" id="ai-status">AI is off for this scene</div>
       </section>
 
@@ -190,9 +216,44 @@
     <label for="set-price">AI price per second (USD, optional)</label>
     <input id="set-price" type="number" min="0" step="0.0001" placeholder="e.g. 0.01">
     <span class="muted small">Used only for the cost meter. Check your provider's current pricing.</span>
+
+    <h3 class="dialog-section">VirtualCam camera</h3>
+    <span class="muted small" id="camera-detail">Checking…</span>
+    <div class="toggle-row">
+      <span id="camout-label">Send the picture to the VirtualCam camera</span>
+      <button type="button" class="switch" id="toggle-camout" aria-labelledby="camout-label"><span></span></button>
+    </div>
+    <div class="row">
+      <button type="button" class="btn" id="btn-camera-install">Install camera</button>
+      <button type="button" class="btn btn-ghost-danger" id="btn-camera-remove">Remove camera</button>
+    </div>
     <div class="dialog-actions">
       <button type="button" class="btn" id="btn-settings-cancel">Cancel</button>
       <button type="submit" class="btn btn-accent" id="btn-settings-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="phone-help" aria-labelledby="phone-h">
+  <form method="dialog" class="dialog-body">
+    <h2 id="phone-h">Use your phone as the camera</h2>
+    <p class="small">A phone camera is usually sharper than a laptop's, which also helps the AI. Once connected, the phone appears in the Camera list like any webcam.</p>
+    <h3 class="dialog-section">iPhone (cable)</h3>
+    <ol class="steps small">
+      <li>Install <strong>Camo</strong> on the iPhone and <strong>Camo Studio</strong> on this computer. The free version is 720p.</li>
+      <li>Install iTunes on this computer so Windows can talk to the iPhone over the cable.</li>
+      <li>Plug the iPhone in, tap <strong>Trust</strong>, and open Camo on both.</li>
+      <li>Pick <strong>Camo</strong> in the Camera list here.</li>
+    </ol>
+    <h3 class="dialog-section">Android (cable)</h3>
+    <ol class="steps small">
+      <li>Android 14 or newer: plug in, pull down the notification for USB, and choose <strong>Webcam</strong>. Not every phone maker turned this on.</li>
+      <li>If there is no Webcam option, use <strong>DroidCam</strong> (phone app plus Windows client) instead.</li>
+      <li>Pick the phone in the Camera list here.</li>
+    </ol>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="btn-refresh-cams">Refresh camera list</button>
+      <button type="submit" class="btn btn-accent">Done</button>
     </div>
   </form>
 </dialog>

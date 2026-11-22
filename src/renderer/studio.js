@@ -1,10 +1,15 @@
 // Studio window: scenes, live preview, AI controls and the output window.
 import { DecartAI } from './engine/ai-decart.js';
+import { LocalFaceAI } from './engine/ai-local.js';
 import { Compositor } from './engine/compositor.js';
 import { SourceManager } from './engine/sources.js';
 import {
+  CHARACTER_PROMPT,
   OUTPUT_FPS,
+  OUTPUT_HEIGHT,
+  OUTPUT_WIDTH,
   PRESETS,
+  isPhoneCamera,
   fileName,
   makeScene,
   normalizeState,
@@ -25,6 +30,12 @@ let aiSeconds = 0;
 let outputWindow = null;
 let toastTimer = null;
 let renderedSceneId = null; // scene whose values the text fields currently show
+let activeEngine = 'none'; // which AI the current scene uses: 'cloud' | 'local' | 'none'
+let cloudState = 'off';
+let hardware = null;
+let models = { core: false, boost: false, coreBytes: 0, boostBytes: 0, busy: false };
+let download = null; // { pack, done, total, file }
+let cameraState = { supported: false, installed: false, running: false, inUse: false, message: '' };
 const refCache = new Map(); // reference image path -> Blob
 
 // ---------- engine ----------
@@ -35,9 +46,8 @@ const sources = new SourceManager($('stage'), {
 });
 const compositor = new Compositor($('program'), $('ai-input'), sources);
 const aiVideo = $('ai-output');
-compositor.setAiVideo(aiVideo);
 
-const ai = new DecartAI({
+const cloud = new DecartAI({
   getApiKey: () => api.getSecret('decartApiKey'),
   getInputStream: (mode) => compositor.aiInput(DecartAI.inputSizeFor(mode)),
   onRemoteStream: (stream) => {
@@ -45,12 +55,32 @@ const ai = new DecartAI({
     if (stream) aiVideo.play().catch(() => {});
   },
   onState: (next) => {
-    aiState = next;
-    compositor.aiLive = next === 'generating';
-    renderAi();
+    cloudState = next;
+    if (activeEngine === 'cloud') {
+      aiState = next;
+      renderAi();
+    }
   },
   onError: (message) => showToast(message, true),
 });
+
+const local = new LocalFaceAI({
+  api,
+  onState: (next) => {
+    if (activeEngine === 'local') {
+      aiState = next;
+      renderAi();
+    }
+    renderLocal();
+  },
+  onError: (message) => showToast(message, true),
+});
+
+// The local engine grabs frames as they are drawn; the camera driver takes each finished frame.
+compositor.beforeRender = (drawSource) => {
+  if (activeEngine === 'local') local.tick(drawSource);
+};
+compositor.afterRender = (canvas) => sendCameraFrame(canvas);
 
 // ---------- state helpers ----------
 
@@ -106,13 +136,20 @@ async function applyScene() {
   sources.use(scene.source);
 
   const wantAi = scene.ai.enabled;
-  compositor.aiFeed = wantAi;
+  const engine = wantAi ? scene.ai.engine : 'none';
+  if (engine !== activeEngine) {
+    activeEngine = engine;
+    aiState = engine === 'cloud' ? cloudState : engine === 'local' ? local.state : 'off';
+  }
+  compositor.aiFeed = engine === 'cloud';
+  if (engine === 'cloud') compositor.setAiSource(aiVideo, () => cloudState === 'generating');
+  else if (engine === 'local') compositor.setAiSource(local.canvas, () => local.live);
+  else compositor.setAiSource(null);
   renderAll();
 
-  if (!wantAi) {
-    ai.setTarget(null);
-    return;
-  }
+  if (engine !== 'cloud') cloud.setTarget(null);
+  if (engine !== 'local') local.setTarget(null);
+  if (engine === 'none') return;
 
   let refBlob = null;
   let refKey = '';
@@ -121,14 +158,21 @@ async function applyScene() {
       refBlob = await loadReference(scene.ai.referencePath);
       refKey = scene.ai.referencePath;
     } catch {
-      showToast('Reference image could not be loaded. Choose it again.', true);
+      showToast('That photo could not be loaded. Choose it again.', true);
     }
   }
   if (token !== applyToken) return; // user moved on while the image loaded
 
-  ai.setTarget({
-    mode: scene.ai.mode,
-    prompt: scene.ai.prompt,
+  if (engine === 'local') {
+    local.setTarget({ refKey, refBlob, enhance: state.settings.faceBoost });
+    return;
+  }
+
+  // Cloud: a reference photo means character swap, which the edit model does.
+  const prompt = scene.ai.prompt || (refBlob ? CHARACTER_PROMPT : '');
+  cloud.setTarget({
+    mode: refBlob ? 'edit' : scene.ai.mode,
+    prompt,
     enhance: scene.ai.enhance,
     refKey,
     refBlob,
@@ -235,7 +279,11 @@ function renderInspector() {
   setPressed($('toggle-mirror'), scene.mirror);
 
   setPressed($('toggle-ai'), scene.ai.enabled);
-  $('ai-mode').value = scene.ai.mode;
+  $('ai-engine').value = scene.ai.engine;
+  $('cloud-group').hidden = scene.ai.engine !== 'cloud';
+  $('local-group').hidden = scene.ai.engine !== 'local';
+  $('ai-mode').value = scene.ai.referencePath ? 'edit' : scene.ai.mode;
+  $('ai-mode').disabled = Boolean(scene.ai.referencePath);
   setPressed($('toggle-enhance'), scene.ai.enhance);
 
   setPressed($('toggle-nametag'), scene.nameTag.enabled);
@@ -251,6 +299,10 @@ function renderPreviewMeta() {
   $('scene-badge').textContent = override ? 'Real camera' : scene.name;
   $('override-badge').hidden = !override;
   $('pipe-source').textContent = override ? 'Webcam' : sourceLabel(scene.source.type);
+  // Prompts and styles only mean something to the cloud AI.
+  const isLocal = scene.ai.engine === 'local';
+  $('look-field').hidden = isLocal;
+  $('styles-field').hidden = isLocal;
 
   const presets = $('presets');
   presets.textContent = '';
@@ -270,10 +322,12 @@ function renderPreviewMeta() {
   });
 
   const ref = scene.ai.referencePath;
-  $('ref-title').textContent = ref ? fileName(ref) : 'Add a reference image';
+  $('ref-title').textContent = ref ? `Becoming: ${fileName(ref)}` : 'Drop a photo or click to choose';
   $('ref-sub').textContent = ref
-    ? 'The AI uses this person or character as the look (Edit mode)'
-    : 'Optional. The AI turns you into the person or character in the photo';
+    ? isLocal
+      ? 'Your face becomes this face. Your hair, clothes and moves stay yours.'
+      : 'The cloud AI turns you into this person: face, hair and outfit, following your moves.'
+    : 'The AI turns you into the person in the photo, following your moves';
   $('btn-ref-clear').hidden = !ref;
 }
 
@@ -288,12 +342,19 @@ const AI_TEXT = {
   disconnected: ['AI disconnected, showing the real picture', 'err'],
   ended: ['AI session ended. Toggle AI to restart', 'err'],
   error: ['AI could not start. Check your key and connection', 'err'],
+  'needs-models': ['Download the local AI models below (one time)', 'warn'],
+  starting: ['Starting the face engine…', 'warn'],
+  loading: ['Reading the face in your photo…', 'warn'],
+  'needs-reference': ['Drop a photo of the person you want to become', 'warn'],
+  'no-face': ['No face found in that photo. Try a clear, front-facing one', 'err'],
 };
 
 function renderAi() {
   const scene = activeScene();
   const showing = override || !scene.ai.enabled ? 'off' : aiState;
-  const [text, tone] = AI_TEXT[showing] || [showing, ''];
+  let [text, tone] = AI_TEXT[showing] || [showing, ''];
+  if (activeEngine === 'local' && showing === 'generating') text = 'Local face swap live';
+  if (activeEngine === 'local' && showing === 'error') text = 'The local face engine hit a problem';
   const status = $('ai-status');
   status.textContent = text;
   status.className = `ai-status${tone ? ` ${tone}` : ''}`;
@@ -301,7 +362,11 @@ function renderAi() {
   const chip = $('pipe-ai');
   const chipText = {
     off: 'AI off',
-    generating: 'AI · Decart',
+    generating: activeEngine === 'local' ? 'AI · local' : 'AI · Decart',
+    starting: 'AI starting',
+    loading: 'AI starting',
+    'needs-models': 'AI needs models',
+    'needs-reference': 'AI needs a photo',
     'needs-key': 'AI needs key',
     'needs-prompt': 'AI needs a look',
     connecting: 'AI starting',
@@ -311,6 +376,74 @@ function renderAi() {
   chip.textContent = chipText[showing] || 'AI stopped';
   chip.className = `chip${showing === 'generating' ? ' on' : showing === 'off' ? '' : ' warn'}`;
   $('foot-ai').textContent = showing === 'generating' ? 'AI live' : showing === 'off' ? 'AI off' : text;
+  renderLocal();
+}
+
+function formatMB(bytes) {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+}
+
+function renderLocal() {
+  if (!state) return;
+  if (hardware) {
+    $('hw-line').textContent = hardware.message || 'Ready.';
+  }
+  const busyCore = download && download.pack === 'core';
+  const busyBoost = download && download.pack === 'boost';
+  if (busyCore || busyBoost) {
+    const pct = download.total ? Math.floor((download.done / download.total) * 100) : 0;
+    $('models-progress').hidden = false;
+    $('models-bar').style.width = `${pct}%`;
+    $('models-line').textContent = `Downloading ${download.file}… ${pct}%`;
+  } else {
+    $('models-progress').hidden = true;
+    $('models-line').textContent = models.core
+      ? 'Local AI models ready'
+      : `Local AI models needed (${formatMB(models.coreBytes)}, one time)`;
+  }
+  const btn = $('btn-models');
+  btn.hidden = models.core && !busyCore;
+  btn.textContent = busyCore ? 'Cancel' : 'Download';
+  btn.disabled = Boolean(busyBoost);
+
+  setPressed($('toggle-boost'), state.settings.faceBoost);
+  $('boost-row').hidden = models.boost && !busyBoost;
+  $('boost-line').textContent = busyBoost ? 'Downloading the detail model…' : `Needs a one-time download (${formatMB(models.boostBytes)})`;
+  $('btn-boost-download').textContent = busyBoost ? 'Cancel' : 'Download';
+  $('btn-boost-download').disabled = Boolean(busyCore);
+
+  const live = activeEngine === 'local' && local.state === 'generating';
+  $('local-stats').textContent = live
+    ? `${local.stats.fps} swaps per second · ${local.stats.ms} ms each · running on ${local.provider === 'dml' ? 'your graphics card' : local.provider === 'coreml' ? 'your Mac' : 'the processor'}`
+    : '';
+}
+
+async function refreshModels() {
+  try {
+    models = await api.modelsStatus();
+  } catch {
+    // keep the last known status
+  }
+  renderLocal();
+}
+
+async function startDownload(pack) {
+  if (download) {
+    api.modelsCancel();
+    return;
+  }
+  download = { pack, done: 0, total: 1, file: 'models' };
+  renderLocal();
+  try {
+    models = await api.modelsDownload(pack);
+    showToast(pack === 'core' ? 'Local AI models downloaded' : 'Face detail boost downloaded');
+  } catch (err) {
+    showToast((err && err.message) || 'Download failed', true);
+  } finally {
+    download = null;
+    await refreshModels();
+    applyScene();
+  }
 }
 
 function renderStatus() {
@@ -329,6 +462,11 @@ function renderStatus() {
 }
 
 function renderCost() {
+  if (activeEngine === 'local') {
+    $('cost-amount').textContent = 'Free';
+    $('cost-note').textContent = 'The local face swap runs on this computer';
+    return;
+  }
   const minutes = Math.floor(aiSeconds / 60);
   const seconds = String(aiSeconds % 60).padStart(2, '0');
   const time = `${minutes}:${seconds}`;
@@ -397,6 +535,63 @@ function openOutput() {
   renderStatus();
 }
 
+// ---------- VirtualCam camera device ----------
+
+const camCanvas = document.createElement('canvas');
+camCanvas.width = OUTPUT_WIDTH;
+camCanvas.height = OUTPUT_HEIGHT;
+const camCtx = camCanvas.getContext('2d', { willReadFrequently: true, alpha: false });
+const camFrame = new Uint8Array(OUTPUT_WIDTH * OUTPUT_HEIGHT * 3);
+
+// Only spends time on frames while some app is actually showing the camera.
+function sendCameraFrame(canvas) {
+  if (!cameraState.running || !cameraState.inUse || !state || !state.settings.cameraOutput) return;
+  camCtx.drawImage(canvas, 0, 0);
+  const rgba = camCtx.getImageData(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT).data;
+  for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+    camFrame[j] = rgba[i + 2];
+    camFrame[j + 1] = rgba[i + 1];
+    camFrame[j + 2] = rgba[i];
+  }
+  api.cameraFrame(camFrame);
+}
+
+function renderCamera() {
+  const btn = $('btn-camera');
+  btn.hidden = !cameraState.supported;
+  btn.classList.toggle('on', cameraState.installed && cameraState.running);
+  if (!cameraState.installed) btn.textContent = 'Install VirtualCam camera';
+  else if (!state || !state.settings.cameraOutput) btn.textContent = 'Camera paused';
+  else if (cameraState.inUse) btn.textContent = 'VirtualCam: in use';
+  else if (cameraState.running) btn.textContent = 'VirtualCam: ready';
+  else btn.textContent = 'VirtualCam: starting…';
+
+  const detail = $('camera-detail');
+  if (!cameraState.supported) detail.textContent = 'The camera device is Windows only for now. Use the output window with OBS.';
+  else if (cameraState.message) detail.textContent = cameraState.message;
+  else if (cameraState.installed) detail.textContent = 'Installed. Pick "VirtualCam" as the camera in Zoom, Meet, Teams, Discord or OBS.';
+  else detail.textContent = 'Not installed. Installing needs admin approval once.';
+  $('btn-camera-install').hidden = !cameraState.supported || cameraState.installed;
+  $('btn-camera-remove').hidden = !cameraState.supported || !cameraState.installed;
+  if (state) setPressed($('toggle-camout'), state.settings.cameraOutput);
+}
+
+async function syncCamera() {
+  if (!cameraState.supported) return;
+  if (cameraState.installed && state.settings.cameraOutput) await api.cameraStart(OUTPUT_WIDTH, OUTPUT_HEIGHT);
+  else await api.cameraStop();
+}
+
+async function installCamera() {
+  showToast('Windows will ask for permission to add the camera…');
+  cameraState = await api.cameraInstall();
+  renderCamera();
+  if (cameraState.installed) {
+    showToast('VirtualCam camera installed. Pick it in your video app.');
+    await syncCamera();
+  }
+}
+
 // ---------- settings ----------
 
 async function openSettings() {
@@ -405,6 +600,7 @@ async function openSettings() {
   $('set-key').placeholder = key ? 'Key saved. Paste a new one to replace it' : 'Paste your key';
   $('key-status').textContent = key ? 'A key is saved on this computer.' : 'No key saved yet.';
   $('set-price').value = state.settings.pricePerSecond > 0 ? String(state.settings.pricePerSecond) : '';
+  renderCamera();
   $('settings').showModal();
 }
 
@@ -517,16 +713,81 @@ function bindEvents() {
 
   $('btn-ref').addEventListener('click', async () => {
     const filePath = await api.pickFile('image');
-    if (!filePath) return;
-    const scene = activeScene();
-    scene.ai.referencePath = filePath;
-    scene.ai.enabled = true;
-    if (scene.ai.mode !== 'edit') {
-      scene.ai.mode = 'edit';
-      showToast('Switched to Edit mode, which uses reference images');
+    if (filePath) setReference(filePath);
+  });
+
+  // Drop a photo anywhere on the window to become that person.
+  let dragDepth = 0;
+  const hasFiles = (e) => Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes('Files');
+  window.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+    $('drop-overlay').hidden = false;
+  });
+  window.addEventListener('dragover', (e) => {
+    if (hasFiles(e)) e.preventDefault();
+  });
+  window.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) $('drop-overlay').hidden = true;
+  });
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    $('drop-overlay').hidden = true;
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp|gif)$/.test(file.type)) {
+      showToast('Drop a photo (PNG, JPG or WebP)', true);
+      return;
     }
-    refCache.delete(filePath);
+    const filePath = api.pathForFile(file);
+    if (!filePath) {
+      showToast('That photo is not a file on this computer. Save it first, then drop it.', true);
+      return;
+    }
+    setReference(filePath);
+  });
+
+  $('ai-engine').addEventListener('change', (e) => {
+    activeScene().ai.engine = e.target.value === 'local' ? 'local' : 'cloud';
     changed();
+  });
+  $('btn-models').addEventListener('click', () => startDownload('core'));
+  $('btn-boost-download').addEventListener('click', () => startDownload('boost'));
+  $('toggle-boost').addEventListener('click', () => {
+    if (!state.settings.faceBoost && !models.boost) {
+      startDownload('boost').then(() => {
+        if (models.boost) {
+          state.settings.faceBoost = true;
+          changed();
+        }
+      });
+      return;
+    }
+    state.settings.faceBoost = !state.settings.faceBoost;
+    changed();
+  });
+
+  $('btn-phone-help').addEventListener('click', () => $('phone-help').showModal());
+  $('btn-refresh-cams').addEventListener('click', () => fillCameras());
+
+  $('btn-camera').addEventListener('click', () => {
+    if (!cameraState.installed) installCamera();
+    else openSettings();
+  });
+  $('btn-camera-install').addEventListener('click', installCamera);
+  $('btn-camera-remove').addEventListener('click', async () => {
+    if (!window.confirm('Remove the VirtualCam camera from Windows? Video apps will no longer see it.')) return;
+    cameraState = await api.cameraUninstall();
+    renderCamera();
+  });
+  $('toggle-camout').addEventListener('click', async () => {
+    state.settings.cameraOutput = !state.settings.cameraOutput;
+    scheduleSave();
+    renderCamera();
+    await syncCamera();
   });
   $('btn-ref-clear').addEventListener('click', () => {
     activeScene().ai.referencePath = '';
@@ -574,6 +835,15 @@ function bindEvents() {
   navigator.mediaDevices.addEventListener('devicechange', () => fillCameras());
 }
 
+function setReference(filePath) {
+  const scene = activeScene();
+  scene.ai.referencePath = filePath;
+  scene.ai.enabled = true;
+  refCache.delete(filePath);
+  changed();
+  showToast(`Becoming the person in ${fileName(filePath)}`);
+}
+
 async function pickFile(type) {
   const filePath = await api.pickFile(type === 'video' ? 'video' : 'image');
   if (!filePath) return;
@@ -591,12 +861,15 @@ async function fillCameras() {
   def.value = '';
   def.textContent = 'Default camera';
   select.append(def);
-  cams.forEach((cam) => {
-    const opt = document.createElement('option');
-    opt.value = cam.id;
-    opt.textContent = cam.label;
-    select.append(opt);
-  });
+  cams
+    // Never offer our own output as an input: that would loop the picture into itself.
+    .filter((cam) => !/^virtualcam/i.test(cam.label))
+    .forEach((cam) => {
+      const opt = document.createElement('option');
+      opt.value = cam.id;
+      opt.textContent = isPhoneCamera(cam.label) ? `${cam.label} (phone)` : cam.label;
+      select.append(opt);
+    });
   renderInspector();
 }
 
@@ -622,16 +895,37 @@ async function start() {
   compositor.start();
 
   setInterval(() => {
-    if (aiState === 'generating' && !override && activeScene().ai.enabled) aiSeconds += 1;
+    if (activeEngine === 'cloud' && cloudState === 'generating' && !override) aiSeconds += 1;
     renderCost();
+    if (activeEngine === 'local') renderLocal();
     $('foot-fps').textContent = `Output ${compositor.fps} fps`;
   }, 1000);
+
+  api.onModelsProgress((p) => {
+    if (download && p.pack === download.pack) {
+      download = { ...download, ...p };
+      renderLocal();
+    }
+  });
+  api.onCameraState((next) => {
+    cameraState = next;
+    renderCamera();
+  });
 
   publishScenes();
   await applyScene();
   await fillCameras();
   scheduleSave();
   reportHotkeyFailures();
+
+  api.hardwareCheck().then((info) => {
+    hardware = info;
+    renderLocal();
+  });
+  refreshModels();
+  cameraState = await api.cameraStatus();
+  renderCamera();
+  await syncCamera();
 
   if (api.smoke) runSmokeTest();
 }
@@ -678,12 +972,88 @@ async function runSmokeTest() {
     await wait(1000);
     report.steps.push({ step: 'output-window', open: Boolean(outputWindow && !outputWindow.closed) });
 
+    report.steps.push({ step: 'camera-device', ...cameraState, buttonHidden: $('btn-camera').hidden });
+
     // A bad key must fail cleanly and keep the real picture on screen.
     await api.setSecret('decartApiKey', 'invalid-smoke-test-key');
     selectScene(state.scenes[1].id);
     await wait(12000);
     report.steps.push({ step: 'ai-bad-key', aiState, toast: $('toast').textContent, ...sample() });
     await api.setSecret('decartApiKey', '');
+
+    // Windows: install the camera the way the Install button does, then watch it like a video app would.
+    if (api.smokeFiles && api.smokeFiles.installCamera && cameraState.supported) {
+      await installCamera();
+      const card = state.scenes.find((s) => s.source.type === 'card');
+      card.source.text = ' ';
+      card.source.color = '#20c864';
+      selectScene(card.id);
+      await wait(1500);
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const vc = devices.find((d) => d.kind === 'videoinput' && /virtualcam/i.test(d.label));
+      const step = { step: 'camera-loopback', installed: cameraState.installed, running: cameraState.running, listed: Boolean(vc) };
+      if (vc) {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: vc.deviceId }, width: 1280, height: 720 } });
+        const video = document.createElement('video');
+        video.muted = true;
+        video.srcObject = stream;
+        $('stage').append(video);
+        await video.play();
+        await wait(3000);
+        const c = document.createElement('canvas');
+        c.width = video.videoWidth;
+        c.height = video.videoHeight;
+        const cx = c.getContext('2d', { willReadFrequently: true });
+        cx.drawImage(video, 0, 0);
+        const px = cx.getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data;
+        step.size = `${c.width}x${c.height}`;
+        step.pixel = [px[0], px[1], px[2]];
+        step.inUse = cameraState.inUse;
+        stream.getTracks().forEach((t) => t.stop());
+        video.remove();
+        step.ok = Math.abs(px[0] - 32) < 14 && Math.abs(px[1] - 200) < 14 && Math.abs(px[2] - 100) < 14;
+      }
+      report.steps.push(step);
+      if (!step.ok) throw new Error('the VirtualCam camera did not show the studio picture');
+    }
+
+    // Local face swap on a still photo of a face, when the test models are available.
+    if (api.smokeFiles && api.smokeFiles.face && api.smokeFiles.ref) {
+      await refreshModels();
+      if (!models.core && api.smokeFiles.downloadModels) {
+        const t0 = Date.now();
+        await startDownload('core');
+        report.steps.push({ step: 'model-download', ok: models.core, seconds: Math.round((Date.now() - t0) / 1000) });
+      }
+      const scene = makeScene({
+        name: 'Smoke local swap',
+        source: { type: 'image', filePath: api.smokeFiles.face },
+        ai: { enabled: true, engine: 'local', referencePath: api.smokeFiles.ref },
+      });
+      state.scenes.push(scene);
+      selectScene(scene.id);
+      const until = Date.now() + 90000;
+      while (Date.now() < until && local.lastResultAt === 0) await wait(500);
+      await wait(500);
+      // How much the face area changed between what went in and what came out.
+      const a = local.inputCtx.getImageData(600, 300, 80, 80).data;
+      const b = local.ctx.getImageData(600, 300, 80, 80).data;
+      let diff = 0;
+      for (let i = 0; i < a.length; i += 4) diff += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+      report.steps.push({
+        step: 'local-swap',
+        models: models.core,
+        aiState,
+        provider: local.provider,
+        swapped: local.lastResultAt > 0,
+        live: local.live,
+        meanFaceChange: Math.round(diff / (80 * 80 * 3)),
+        ms: local.stats.ms,
+        hardware: hardware && hardware.verdict,
+      });
+      if (!(local.lastResultAt > 0)) throw new Error('local face swap produced no result');
+    }
+
 
     report.ok = true;
   } catch (err) {
