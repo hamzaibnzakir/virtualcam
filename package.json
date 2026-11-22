@@ -13,10 +13,10 @@
   "author": "Foluceen",
   "license": "UNLICENSED",
   "devDependencies": {
+    "@decartai/sdk": "^0.2.14",
     "electron": "^45.4.1",
     "electron-builder": "^26.18.0",
-    "esbuild": "^0.28.2",
-    "@decartai/sdk": "^0.2.14"
+    "esbuild": "^0.28.2"
   },
   "private": true,
   "build": {
@@ -37,5 +37,8 @@
       "target": "dmg",
       "category": "public.app-category.video"
     }
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.31.1"
   }
 }
