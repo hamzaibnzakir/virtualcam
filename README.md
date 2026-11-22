@@ -1,79 +1,91 @@
 # VirtualCam
 
-A desktop studio that decides what your camera shows: your real webcam, an image, a looping video, your screen, a text card, or a live AI-restyled version of any of them. You switch between these "scenes" instantly with hotkeys, from any app.
+A desktop studio that decides what your camera shows. Drop in a photo and you become that person, following your real moves. Or show a looping video, a picture, your screen or a text card. Switch between "scenes" instantly with hotkeys from any app.
 
-This is **phase 1**: the studio, scene engine, AI and hotkeys. Phase 2 adds VirtualCam as a real camera device in Windows. Until then, OBS carries the picture into Zoom, Meet and similar apps (see "Use it in calls today").
+Zoom, Google Meet (in Chrome or Edge), Teams, Discord and OBS see it as a normal camera called **VirtualCam**, on Windows 10 and Windows 11.
 
-## Run it (Windows or Mac)
+## Install (Windows)
 
-1. Install **Node.js LTS** from nodejs.org.
-2. Unzip this folder, open a terminal in it, and run:
+**Option A: installer.** Open this repo's **Actions** tab, then **App on Windows**, then the latest green run. Under **Artifacts**, download **VirtualCam-Windows-installer** and run it.
 
-   ```
-   npm install
-   npm start
-   ```
-
-3. Open **Settings** (the gear, top right) and paste your **Decart API key** (from platform.decart.ai). It is stored encrypted on your computer.
-
-## Using it
-
-- **Scenes** (left): click one, or press **Ctrl + Alt + 1–9** in any app (Cmd + Option on Mac). Number keys 1–9 also work while the studio is focused.
-- **Panic**: **Ctrl + Alt + 0**, or the red button, goes straight back to your plain webcam with no AI and no overlays.
-- **Quick switcher**: **Ctrl + Alt + Space** pops up a scene list over whatever you're doing.
-- **Source** (right): Webcam, Image, Video (loops), Screen (the screen your mouse is on) or Text card.
-- **AI transform**: turn it on, then type a look and press **Apply live**, or tap a quick style. The prompt changes live without reconnecting.
-  - *Restyle me* restyles the whole picture.
-  - *Edit scene or become a character* edits parts of the picture (background swaps, objects). It also accepts a **reference image**, so you can become the person or character in a photo.
-- **Name tag**: an on-screen name and title.
-- **Cost meter**: counts the seconds AI is actually generating. Add your provider's per-second price in Settings to see dollars.
-
-If the AI connection drops, or the key is missing or wrong, the output falls back to the real picture. It never goes black.
-
-## Use it in calls today (with OBS)
-
-1. Click **Open output window** in VirtualCam. It shows a clean 1280×720 picture.
-2. In OBS: add a **Window Capture** source and pick "VirtualCam Output".
-3. Click **Start Virtual Camera** in OBS.
-4. In Zoom, Meet, Discord etc., choose **OBS Virtual Camera** as your camera.
-
-Keep the output window open (it can sit behind other windows). Minimizing the studio is fine, because frames keep rendering.
-
-## Build an installer
+**Option B: from source.** Install Node.js LTS, then in this folder run:
 
 ```
-npm run dist        # Windows .exe installer (run this on Windows)
-npm run dist:mac    # Mac .dmg (run this on a Mac)
+npm install
+npm start
 ```
 
-The installer lands in `release/`.
+Then, in the app:
 
-## Self-test
+1. Click **Install VirtualCam camera** (top bar). Windows asks for admin approval once.
+2. In your video app, pick **VirtualCam** as the camera.
 
-```
-npm run smoke
-```
+The app only spends effort on the camera while some app is actually showing it.
 
-This launches the app hidden with a fake camera and runs every scene type, panic mode, a new scene with a name tag, the output window, the quick switcher, and an AI connection with a bad key. It fails on any console error.
+## Cameras: laptop or phone
+
+Pick any camera in **Source → Camera**. Phone cameras are usually sharper, which also helps the AI. In the app, see **Use your phone as the camera**:
+
+- **iPhone:** Camo (free, 720p) over the cable. Needs iTunes on the PC.
+- **Android 14+:** plug in, then choose **USB → Webcam** on the phone. On phones without that option, use DroidCam.
+
+## Becoming someone: the two AI engines
+
+Drop a photo anywhere on the window (or click the photo box) and turn on **AI transform**.
+
+| | **Local · face swap** | **Cloud · face and clothes** |
+|---|---|---|
+| What changes | Your face becomes their face. Hair, clothes, body and moves stay yours. | Face, hair and outfit become theirs. Your moves and expressions drive it. |
+| Cost | Free, runs on your computer | Decart, $0.02 per second (about $1.20 per minute) |
+| Needs | A one-time 470 MB model download. A graphics card with 2 GB+ is recommended (any DirectX 12 GPU; your Dell's Quadro T2000 qualifies). | A Decart API key (Settings) and a good internet connection |
+| Extras | **Face detail boost**: sharper face, slower, 340 MB extra download | Type a look or pick a quick style instead of a photo |
+
+The app checks your graphics card and says whether local AI will run well. If AI stops or drops, the real picture shows instead. It never goes black. Your **voice is never touched**: VirtualCam is video only, so your microphone goes straight to the call.
+
+## Everyday use
+
+- **Scenes:** click one, or press **Ctrl + Alt + 1–9** from any app.
+- **Panic:** **Ctrl + Alt + 0**, or the red button, goes straight back to your plain camera.
+- **Quick switcher:** **Ctrl + Alt + Space**.
+- **Video loop / image / screen / text card:** choose them under **Source**.
+- **Name tag:** an on-screen name and title.
+- **Output window:** a clean 1280×720 window for OBS, or for Mac and Linux where the camera device isn't available yet.
+
+## Using it responsibly
+
+Use your own face, characters, or people who have agreed to it. Don't use it to pass as someone else, or to fool identity or selfie checks. VirtualCam has no features for that, and none will be added.
+
+## How it's tested
+
+- `npm run smoke` launches the app hidden with a fake camera and exercises every scene type, panic mode, the output window, the quick switcher, a cloud connection with a bad key, and (with the test models) a real local face swap. It fails on any console error.
+- `node scripts/test-faceswap.cjs` checks swap quality with a face-recognition model: the swapped face must match the photo's identity.
+- **GitHub Actions → Windows camera** builds the camera device (64-bit and 32-bit) and proves it end to end on Windows. It registers the camera, sends known colours, captures them back through DirectShow like a video app, and checks they arrive exactly. Log: `ci-logs/windows-camera.txt`.
+- **GitHub Actions → App on Windows** runs the real app on Windows. It installs the camera through the app, reads the app's picture back from the VirtualCam camera, downloads the models with the app's downloader, runs a local face swap, and builds the installer. Log: `ci-logs/app-windows.txt`.
 
 ## Project layout
 
 ```
-src/main/main.js            app windows, hotkeys, files, encrypted key storage
-src/main/preload.js         the safe bridge between windows and the app
-src/renderer/studio.*       the studio window
-src/renderer/switcher.*     the quick switcher overlay
-src/renderer/engine/
-  state.js                  scene model, defaults, saved-state loading
-  sources.js                webcam / image / video / screen / text card
-  compositor.js             draws the program picture at 30 fps + name tag
-  ai-decart.js              Decart realtime adapter (WebRTC in, video out)
+src/main/main.js              windows, hotkeys, files, encrypted key storage, IPC
+src/main/camera-driver.js     installs the VirtualCam camera and streams frames into it
+src/main/models.js            model downloads with checksums
+src/main/hardware.js          graphics card / VRAM check
+src/main/faceswap/            local face swap engine (runs in its own process)
+  worker.js                   engine process
+  swapper.js                  detect -> identity -> swap -> optional detail boost
+  detector.js                 SCRFD face finder
+  face-math.js, paste.js      alignment and blending
+  onnx-initializer.js         reads the swap model's identity matrix
+src/renderer/                 the studio window
+  engine/ai-local.js          talks to the local engine, composites swapped faces
+  engine/ai-decart.js         Decart realtime (cloud) adapter
+  engine/compositor.js        draws the picture at 30 fps
+native/softcam/               the camera device (Softcam, MIT, renamed to VirtualCam)
+native/vcam-bridge/           tiny program that feeds frames into the camera
+vendor/win/                   tested camera binaries, committed by CI
 ```
 
-AI providers share one small shape (`setTarget`, `stop`, state and error callbacks), so fal.ai or others can be added as another adapter next to `ai-decart.js`.
+## Credits and licenses
 
-## What's next (phase 2)
-
-- Register VirtualCam as a real Windows camera (Media Foundation virtual camera on Windows 11, DirectShow fallback for older apps), so OBS is no longer needed.
-- Mac camera extension.
-- A fal.ai adapter as a second AI provider.
+- Camera device: [Softcam](https://github.com/tshino/softcam) by tshino, MIT.
+- Face models are downloaded on first use. The InsightFace models (face finder, identity, inswapper) are licensed for **non-commercial use only**. GFPGAN is Apache-2.0. Selling VirtualCam with the local engine would need commercially licensed models.
+- Cloud AI: [Decart](https://platform.decart.ai) realtime API.
