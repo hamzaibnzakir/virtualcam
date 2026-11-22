@@ -152,6 +152,7 @@ else if (needInputs || engine === 'local') {
 // ---------- motion mode: landmark accuracy over the moving frames, identity on a few of them ----------
 if (motion) {
   const { pairMetrics, summariseMotion } = require('./motion.cjs');
+  await scorer.load(); // identity on the scored frames needs the models
   const avg = (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined);
   const rows = [];
   for (const [index, p] of pairs.entries()) {
