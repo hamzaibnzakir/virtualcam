@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>Switch scene</title>
+<style>
+  html, body { margin: 0; background: transparent; height: 100%; }
+  body { font: 14px/1.4 "Segoe UI Variable Text", "Segoe UI", -apple-system, system-ui, sans-serif; color: #F2F3F5; }
+  .card {
+    margin: 10px; padding: 16px; border-radius: 20px;
+    background: #14161C; border: 1px solid #2A2E38;
+    display: flex; flex-direction: column; gap: 6px;
+    max-height: calc(100vh - 20px); overflow: auto; box-sizing: border-box;
+  }
+  .head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px 6px; }
+  .title { font-weight: 600; font-size: 16px; }
+  .hint { color: #9BA1AE; font-size: 12px; }
+  button {
+    font: inherit; color: inherit; cursor: pointer;
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    min-height: 46px; padding: 0 12px; border-radius: 12px;
+    background: transparent; border: 1px solid transparent; text-align: left;
+  }
+  button:hover, button:focus-visible { background: #1C1F27; outline: none; }
+  button[aria-current="true"] { background: #1C1F27; border-color: #7CF0C2; }
+  kbd {
+    font-family: inherit; font-size: 12px; min-width: 22px; text-align: center;
+    padding: 3px 6px; border-radius: 6px; background: #22252E; color: #C9CDD6;
+  }
+  .name { flex: 1 1 auto; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kind { color: #9BA1AE; font-size: 12px; white-space: nowrap; }
+  .panic { margin-top: 6px; background: #2A1416; border-color: #5A2A2A; color: #FFB4AC; }
+  .panic:hover, .panic:focus-visible { background: #3A1D20; }
+  .panic kbd { background: #3A1D20; color: #FFB4AC; }
+</style>
+</head>
+<body>
+  <div class="card" role="dialog" aria-label="Switch scene">
+    <div class="head"><span class="title">Switch scene</span><span class="hint">Press a number · Esc to close</span></div>
+    <div id="list"></div>
+    <button type="button" class="panic" id="panic"><kbd>0</kbd><span class="name">Real camera now</span></button>
+  </div>
+  <script src="switcher.js"></script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; connect-src 'self' https: wss: blob:; worker-src 'self' blob:; font-src 'self'">
+<title>VirtualCam</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>
+      </div>
+      <span class="brand-name">VirtualCam</span>
+    </div>
+    <div class="pill" id="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">Starting…</span></div>
+    <div class="spacer"></div>
+    <span class="muted">1280×720 · 30 fps</span>
+    <button type="button" class="btn" id="btn-output">Open output window</button>
+    <button type="button" class="btn btn-danger" id="btn-panic">Back to real camera <kbd id="kbd-panic">Ctrl Alt 0</kbd></button>
+    <button type="button" class="icon-btn" id="btn-settings" aria-label="Settings">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+
+  <div class="columns">
+
+    <section class="panel scenes" aria-labelledby="scenes-h">
+      <div class="panel-head">
+        <h2 id="scenes-h">Scenes</h2>
+        <span class="muted small" id="scenes-hint">Ctrl Alt 1–9 in any app</span>
+      </div>
+      <div class="scene-list" id="scene-list"></div>
+      <button type="button" class="btn-dashed" id="btn-new-scene">+ New scene</button>
+    </section>
+
+    <section class="panel preview-panel" aria-labelledby="preview-h">
+      <div class="panel-head wrap">
+        <h2 id="preview-h">What everyone sees</h2>
+        <span class="live">LIVE</span>
+        <div class="spacer"></div>
+        <div class="pipeline">
+          <span class="chip" id="pipe-source">Webcam</span>
+          <span class="arrow" aria-hidden="true">→</span>
+          <span class="chip" id="pipe-ai">AI off</span>
+          <span class="arrow" aria-hidden="true">→</span>
+          <span class="chip">Output</span>
+        </div>
+      </div>
+
+      <div class="preview">
+        <canvas id="program" aria-label="Live output preview"></canvas>
+        <div class="preview-badge" id="scene-badge">Scene</div>
+        <div class="preview-badge right" id="override-badge" hidden>Real camera</div>
+      </div>
+
+      <div class="field">
+        <label for="prompt">Describe the look</label>
+        <div class="row">
+          <input id="prompt" type="text" maxlength="1000" placeholder="e.g. anime style, soft studio lighting, keep my face" autocomplete="off">
+          <button type="button" class="btn btn-accent" id="btn-apply">Apply live</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">Quick styles</span>
+        <div class="presets" id="presets"></div>
+      </div>
+
+      <div class="ref-row">
+        <button type="button" class="ref-btn" id="btn-ref">
+          <span class="ref-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>
+          </span>
+          <span class="ref-text">
+            <span class="strong" id="ref-title">Add a reference image</span>
+            <span class="muted small" id="ref-sub">Optional. The AI turns you into the person or character in the photo</span>
+          </span>
+        </button>
+        <button type="button" class="btn" id="btn-ref-clear" hidden>Remove</button>
+      </div>
+    </section>
+
+    <aside class="inspector" aria-label="Scene settings">
+
+      <section class="panel">
+        <div class="field">
+          <label for="scene-name">Scene name</label>
+          <input id="scene-name" type="text" maxlength="60" autocomplete="off">
+        </div>
+        <div class="muted small" id="scene-hotkey"></div>
+      </section>
+
+      <section class="panel">
+        <h3>Source</h3>
+        <div class="segmented" id="source-types" role="group" aria-label="Source type">
+          <button type="button" data-source="webcam">Webcam</button>
+          <button type="button" data-source="image">Image</button>
+          <button type="button" data-source="video">Video</button>
+          <button type="button" data-source="screen">Screen</button>
+          <button type="button" data-source="card">Text</button>
+        </div>
+
+        <div class="source-detail" id="detail-webcam">
+          <label for="camera-select">Camera</label>
+          <select id="camera-select"></select>
+        </div>
+        <div class="source-detail" id="detail-file" hidden>
+          <span class="label" id="file-label">File</span>
+          <div class="row">
+            <span class="file-name" id="file-name">No file chosen</span>
+            <button type="button" class="btn" id="btn-pick-file">Choose…</button>
+          </div>
+        </div>
+        <div class="source-detail" id="detail-screen" hidden>
+          <span class="muted small">Captures the screen your mouse is on.</span>
+        </div>
+        <div class="source-detail" id="detail-card" hidden>
+          <label for="card-text">Text</label>
+          <input id="card-text" type="text" maxlength="120" autocomplete="off">
+          <label for="card-color">Background</label>
+          <input id="card-color" type="color">
+        </div>
+
+        <div class="toggle-row">
+          <span id="mirror-label">Mirror picture</span>
+          <button type="button" class="switch" id="toggle-mirror" aria-labelledby="mirror-label"><span></span></button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="toggle-row">
+          <h3 id="ai-label">AI transform</h3>
+          <button type="button" class="switch" id="toggle-ai" aria-labelledby="ai-label"><span></span></button>
+        </div>
+        <label for="ai-provider">Provider</label>
+        <select id="ai-provider">
+          <option value="decart">Decart · live video</option>
+        </select>
+        <label for="ai-mode">Mode</label>
+        <select id="ai-mode">
+          <option value="restyle">Restyle me</option>
+          <option value="edit">Edit scene or become a character</option>
+        </select>
+        <div class="toggle-row">
+          <span id="enhance-label">Let AI improve my prompt</span>
+          <button type="button" class="switch" id="toggle-enhance" aria-labelledby="enhance-label"><span></span></button>
+        </div>
+        <div class="ai-status" id="ai-status">AI is off for this scene</div>
+      </section>
+
+      <section class="panel">
+        <div class="toggle-row">
+          <h3 id="tag-label">Name tag</h3>
+          <button type="button" class="switch" id="toggle-nametag" aria-labelledby="tag-label"><span></span></button>
+        </div>
+        <label for="tag-name">Name</label>
+        <input id="tag-name" type="text" maxlength="60" autocomplete="off">
+        <label for="tag-title">Title</label>
+        <input id="tag-title" type="text" maxlength="80" autocomplete="off">
+      </section>
+
+      <section class="panel cost">
+        <span class="muted small">AI this session</span>
+        <span class="cost-amount" id="cost-amount">0:00</span>
+        <span class="muted small" id="cost-note">Billed per second while AI is generating</span>
+      </section>
+
+      <button type="button" class="btn btn-ghost-danger" id="btn-delete-scene">Delete this scene</button>
+    </aside>
+  </div>
+
+  <footer class="footer">
+    <span id="foot-fps">Output — fps</span>
+    <span id="foot-ai">AI off</span>
+    <span>If AI drops, the real picture shows instead</span>
+    <span id="foot-switcher">Ctrl Alt Space opens the quick switcher</span>
+  </footer>
+</div>
+
+<dialog id="settings" aria-labelledby="settings-h">
+  <form method="dialog" class="dialog-body" id="settings-form">
+    <h2 id="settings-h">Settings</h2>
+    <label for="set-key">Decart API key</label>
+    <input id="set-key" type="password" autocomplete="off" placeholder="Paste your key">
+    <span class="muted small" id="key-status"></span>
+    <label for="set-price">AI price per second (USD, optional)</label>
+    <input id="set-price" type="number" min="0" step="0.0001" placeholder="e.g. 0.01">
+    <span class="muted small">Used only for the cost meter. Check your provider's current pricing.</span>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="btn-settings-cancel">Cancel</button>
+      <button type="submit" class="btn btn-accent" id="btn-settings-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<div class="stage" id="stage" aria-hidden="true">
+  <canvas id="ai-input"></canvas>
+  <video id="ai-output" muted playsinline></video>
+</div>
+
+<script src="studio.js"></script>
+</body>
+</html>

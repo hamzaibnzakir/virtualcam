@@ -1,0 +1,41 @@
+{
+  "name": "virtualcam",
+  "version": "0.1.0",
+  "description": "Desktop virtual camera studio: scenes, live AI restyling, hotkeys",
+  "main": "src/main/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && electron .",
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "dist": "npm run build && electron-builder --win nsis",
+    "dist:mac": "npm run build && electron-builder --mac dmg"
+  },
+  "author": "Foluceen",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "@decartai/sdk": "^0.2.14"
+  },
+  "private": true,
+  "build": {
+    "appId": "com.foluceen.virtualcam",
+    "productName": "VirtualCam",
+    "files": [
+      "src/main/**",
+      "dist/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.video"
+    }
+  }
+}
