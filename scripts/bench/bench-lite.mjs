@@ -2,6 +2,9 @@
 //
 //   node scripts/bench/bench-lite.mjs [--split train|holdout|all] [--limit N] [--engine lite|local|original]
 //        [--params '{"shading":0.3}'] [--out DIR] [--images N] [--frames N] [--quiet]
+//        [--sweep '[{"shading":0.1},{"shading":0.3}]' | --sweep FILE.json]
+//   --sweep (tuning aid, lite only): after the normal render, re-renders each pair's last tracked frame
+//   with every parameter set (on top of --params) and prints one extra summary line per set.
 //
 // Shared data (set these to reuse downloads between runs and worktrees):
 //   BENCH_FACES   folder with the SFHQ sample jpgs   (downloaded if missing)
@@ -34,6 +37,8 @@ const params = JSON.parse(arg('params', '{}'));
 const frames = Number(arg('frames', '4'));
 const imageCount = Number(arg('images', '0'));
 const quiet = flag('quiet');
+const sweepArg = arg('sweep', '');
+const sweep = sweepArg ? JSON.parse(existsSync(sweepArg) ? readFileSync(sweepArg, 'utf8') : sweepArg) : null;
 const out = resolve(arg('out', join(tmpdir(), `lite-bench-${Date.now()}`)));
 const cacheRoot = resolve(process.env.BENCH_CACHE || join(root, '.bench-cache'));
 const facesDir = resolve(process.env.BENCH_FACES || join(cacheRoot, 'faces'));
@@ -65,7 +70,6 @@ if (!existsSync(join(modelsDir, 'w600k_r50.onnx'))) {
 
 const { Scorer, cos, poseError, summarise, W, H } = require('./score.cjs');
 const scorer = new Scorer(modelsDir, join(cacheRoot, 'scores'));
-await scorer.load();
 const key = (kind, p) => `${kind}:${kind === 'ref' ? p.ref : `${p.target}:${JSON.stringify(p.frame)}`}`;
 const cacheFile = (k) => join(cacheRoot, 'scores', `${createHash('sha1').update(k).digest('hex')}.json`);
 for (const p of pairs) {
@@ -97,7 +101,7 @@ async function render(mode, renderPairs) {
   symlinkSync(join(root, 'assets/mediapipe/face_landmarker.task'), join(dist, 'mediapipe', 'face_landmarker.task'));
 
   const configFile = join(out, 'config.json');
-  writeFileSync(configFile, JSON.stringify({ mode, pairs: renderPairs, params, frames, facesDir, outDir: out, assetsDir: dist }));
+  writeFileSync(configFile, JSON.stringify({ mode, pairs: renderPairs, params, sweep, frames, facesDir, outDir: out, assetsDir: dist }));
   const electron = require('electron');
   let cmd = electron;
   let args = [join(here, 'electron-main.cjs')];
@@ -130,6 +134,8 @@ else if (needInputs || engine === 'local') {
 }
 
 // ---------- score ----------
+// Models load only now, so they don't hold memory while Electron renders.
+await scorer.load();
 let local = null;
 if (engine === 'local') {
   const ort = require('onnxruntime-node');
@@ -220,3 +226,29 @@ sheet.save(out + '/compare.jpg', quality=88)
 }
 
 console.log(JSON.stringify(summary));
+
+// ---------- sweep: one summary per parameter set ----------
+if (sweep && engine === 'lite') {
+  const sweepRows = sweep.map(() => []);
+  for (const p of pairs) {
+    const id = `${p.split}:${p.target}`;
+    const ref = await scorer.cached(key('ref', p), () => null);
+    const orig = await scorer.cached(key('orig', p), () => null);
+    for (let k = 0; k < sweep.length; k += 1) {
+      const row = { id };
+      const outFile = join(out, `${p.target}.out.${k}.rgba`);
+      const res = ref && orig && existsSync(outFile) ? await scorer.analyse(readRgba(outFile), W, H) : null;
+      if (!res) row.error = 'no face in output';
+      else {
+        row.idRef = cos(res.emb, ref.emb);
+        row.idOrig = cos(res.emb, orig.emb);
+        row.idBase = cos(orig.emb, ref.emb);
+        row.pose = poseError(res.kps, orig.kps);
+      }
+      sweepRows[k].push(row);
+    }
+  }
+  const all = sweep.map((set, k) => ({ sweep: k, params: { ...params, ...set }, ...summarise(sweepRows[k]) }));
+  writeFileSync(join(out, 'sweep.json'), JSON.stringify({ all, rows: sweepRows }, null, 2));
+  for (const s of all) console.log(JSON.stringify(s));
+}

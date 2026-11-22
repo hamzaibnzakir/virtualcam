@@ -5,7 +5,8 @@
 //      leaving holes for your real eyes and mouth so blinks, speech and teeth stay yours.
 //   3. In a WebGL shader: match the photo's colours to your camera in LAB space, take the room's
 //      shading from your camera (frequency separation), add back your skin highlights, and feather
-//      the edges. Triangles that turn away from the camera fade out instead of smearing.
+//      the edges. Triangles that turn away from the camera fade out instead of smearing. If you
+//      wear glasses, their rims stay on top of the photo's face.
 import { FaceLandmarker } from '@mediapipe/tasks-vision';
 import Delaunator from 'delaunator';
 import { output } from './state.js';
@@ -16,7 +17,24 @@ const FRESH_MS = 1000;
 //   detail:   how much of the camera's fine skin detail/highlights is added back
 //   blurDiv:  lighting blur radius = face width / blurDiv
 //   contrast: 0 = take the camera's colour contrast, 1 = keep the photo's
-export const liteTuning = { shading: 0.2, detail: 0.05, blurDiv: 10, contrast: 0.5 };
+//   feather:  soft edge at the face outline, as a share of face width
+//   holeFeather: soft edge around the eye holes, as a share of face width
+//   mouthFeather: soft edge around the mouth hole, as a share of face width
+//   eyeEdge:  photo opacity right at the eye opening (0 = fade to your eye, 1 = hard edge)
+//   glassesCam: 1 = keep the rims of your own glasses on top of the photo's face (when detected)
+//   spanCut:  1 = also cut triangles that join the upper and lower lid/lip (closed eyes/mouth in the photo)
+export const liteTuning = {
+  shading: 0.15,
+  detail: 0.03,
+  blurDiv: 7,
+  contrast: 0.5,
+  feather: 0.03,
+  holeFeather: 0.01,
+  mouthFeather: 0.01,
+  eyeEdge: 0.75,
+  spanCut: 1,
+  glassesCam: 1,
+};
 const TUNE = liteTuning;
 const MESH_POINTS = 468; // 0..467 are the face; 468..477 are the irises
 const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
@@ -24,6 +42,15 @@ const RIGHT_EYE = [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 14
 const LEFT_EYE = [263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249];
 const INNER_LIPS = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95];
 const HOLES = [RIGHT_EYE, LEFT_EYE, INNER_LIPS];
+// Upper and lower lids/lips (two rings each, corners left out), per hole.
+const HOLE_SIDES = [
+  [[246, 161, 160, 159, 158, 157, 173, 247, 30, 29, 27, 28, 56, 190], [7, 163, 144, 145, 153, 154, 155, 25, 110, 24, 23, 22, 26, 112]],
+  [[466, 388, 387, 386, 385, 384, 398, 467, 260, 259, 257, 258, 286, 414], [249, 390, 373, 374, 380, 381, 382, 255, 339, 254, 253, 252, 256, 341]],
+  [
+    [185, 40, 39, 37, 0, 267, 269, 270, 409, 184, 74, 73, 72, 11, 302, 303, 304, 408, 183, 42, 41, 38, 12, 268, 271, 272, 407, 191, 80, 81, 82, 13, 312, 311, 310, 415],
+    [146, 91, 181, 84, 17, 314, 405, 321, 375, 77, 90, 180, 85, 16, 315, 404, 320, 307, 96, 89, 179, 86, 15, 316, 403, 319, 325, 95, 88, 178, 87, 14, 317, 402, 318, 324],
+  ],
+];
 
 // ---------- small geometry helpers ----------
 
@@ -105,6 +132,127 @@ function labStats(data, width, height, poly) {
   return { mean, std };
 }
 
+// ---------- glasses ----------
+// Glasses show as thin dark lines: the "black top-hat" (grey closing minus the image) picks out
+// dark structures thinner than the filter, like rims, but not broad shading.
+
+// Max (dilate) or min (erode) over a (2r+1)² square, separable, on a w×h Float32Array.
+function rankFilter(src, w, h, r, dilate) {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let v = src[y * w + x];
+      for (let k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k += 1) {
+        const s = src[y * w + k];
+        if (dilate ? s > v : s < v) v = s;
+      }
+      tmp[y * w + x] = v;
+    }
+  }
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let v = tmp[y * w + x];
+      for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k += 1) {
+        const s = tmp[k * w + x];
+        if (dilate ? s > v : s < v) v = s;
+      }
+      out[y * w + x] = v;
+    }
+  }
+  return out;
+}
+
+// Glasses score (see glassesScore) where glasses start to count, and where they fully count.
+const GLASSES_LO = 10;
+const GLASSES_HI = 14;
+
+const closing = (src, w, h, r) => rankFilter(rankFilter(src, w, h, r, true), w, h, r, false);
+
+function centroid(ids, pt) {
+  let x = 0;
+  let y = 0;
+  for (const i of ids) {
+    const p = pt(i);
+    x += p[0];
+    y += p[1];
+  }
+  return [x / ids.length, y / ids.length];
+}
+
+// The eyes' frame: centres, eye distance, and unit axes along and across the eye line.
+function eyeFrame(pt) {
+  const r = centroid(RIGHT_EYE, pt);
+  const l = centroid(LEFT_EYE, pt);
+  const ed = Math.hypot(l[0] - r[0], l[1] - r[1]) || 1;
+  const ax = [(l[0] - r[0]) / ed, (l[1] - r[1]) / ed];
+  return { r, l, ed, ax, up: [ax[1], -ax[0]], mid: [(r[0] + l[0]) / 2, (r[1] + l[1]) / 2] };
+}
+
+// How strongly a dark line crosses the nose bridge (glasses), minus the forehead's own fine texture
+// (wrinkles). Reads an RGBA patch `data` (patchW wide) whose top-left is (ox, oy) in image pixels.
+function glassesScore(data, patchW, patchH, ox, oy, eyes) {
+  const { ed, ax, up, mid } = eyes;
+  const r = Math.max(1, Math.round(0.06 * ed));
+  const L = new Float32Array(patchW * patchH);
+  for (let i = 0; i < patchW * patchH; i += 1) L[i] = (0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]) / 2.55;
+  const close = closing(L, patchW, patchH, r);
+  // s: along the eye line, t: up the face (both in eye distances from the eyes' midpoint).
+  const hat = (s, t) => {
+    const x = Math.round(mid[0] + (s * ax[0] + t * up[0]) * ed - ox);
+    const y = Math.round(mid[1] + (s * ax[1] + t * up[1]) * ed - oy);
+    if (x < 0 || y < 0 || x >= patchW || y >= patchH) return 0;
+    return close[y * patchW + x] - L[y * patchW + x];
+  };
+  const step = 1 / ed;
+  let bridge = 0;
+  for (let t = -0.15; t <= 0.35; t += step) {
+    let sum = 0;
+    let n = 0;
+    for (let s = -0.12; s <= 0.12; s += step) {
+      sum += hat(s, t);
+      n += 1;
+    }
+    bridge = Math.max(bridge, sum / Math.max(1, n));
+  }
+  let tex = 0;
+  let n = 0;
+  for (let t = 0.6; t <= 0.9; t += step * 2) {
+    for (let s = -0.3; s <= 0.3; s += step * 2) {
+      tex += hat(s, t);
+      n += 1;
+    }
+  }
+  return bridge - tex / Math.max(1, n);
+}
+
+// Pixel box (clamped) around the eye midpoint: `side` eye distances left/right, `above`/`below` up/down.
+function glassesBox(eyes, width, height, side, above, below) {
+  const { ed, mid } = eyes;
+  const x0 = Math.max(0, Math.floor(mid[0] - side * ed));
+  const y0 = Math.max(0, Math.floor(mid[1] - above * ed));
+  const x1 = Math.min(width, Math.ceil(mid[0] + side * ed));
+  const y1 = Math.min(height, Math.ceil(mid[1] + below * ed));
+  return { x0, y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+}
+
+// Glasses score of the face in a canvas (see glassesScore). Big faces are checked at reduced size
+// (eye distance about 100 px) so it stays a few milliseconds.
+let glassesCtx = null;
+function detectGlasses(canvas, width, height, eyes) {
+  const { x0, y0, w, h } = glassesBox(eyes, width, height, 0.45, 1.05, 0.3);
+  const k = Math.min(1, 100 / eyes.ed);
+  const pw = Math.max(1, Math.round(w * k));
+  const ph = Math.max(1, Math.round(h * k));
+  if (!glassesCtx) glassesCtx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  if (glassesCtx.canvas.width < pw) glassesCtx.canvas.width = pw;
+  if (glassesCtx.canvas.height < ph) glassesCtx.canvas.height = ph;
+  glassesCtx.drawImage(canvas, x0, y0, w, h, 0, 0, pw, ph);
+  const patch = glassesCtx.getImageData(0, 0, pw, ph).data;
+  const small = { ...eyes, ed: eyes.ed * k, mid: [(eyes.mid[0] - x0) * k, (eyes.mid[1] - y0) * k] };
+  return glassesScore(patch, pw, ph, 0, 0, small);
+}
+
 // ---------- one-euro filter: steady when still, instant when you move ----------
 
 class OneEuro {
@@ -183,6 +331,8 @@ uniform sampler2D uFrame;
 uniform vec2 uViewport;
 uniform vec3 uSrcMean, uSrcStd, uDstMean, uDstStd;
 uniform float uSrcLod, uFrameLod, uShading, uDetail, uStrength;
+uniform float uCamGlasses, uGlassEd, uGlassLod;
+uniform vec2 uGlassR, uGlassL, uGlassAx; // your eye centres and eye line, in output pixels
 in vec2 vSrcUV;
 in float vAlpha;
 out vec4 outColor;
@@ -217,6 +367,23 @@ vec3 transfer(vec3 c) {
   return lab2rgb(lab);
 }
 
+// Where glasses sit around one eye (less far up than down, so brows stay out), 0..1.
+float glassZone(vec2 p, vec2 c) {
+  vec2 d = p - c;
+  float v = dot(d, vec2(uGlassAx.y, -uGlassAx.x));
+  vec2 q = vec2(dot(d, uGlassAx) / 0.6, v / (v > 0.0 ? 0.4 : 0.48)) / uGlassEd;
+  return 1.0 - smoothstep(0.8, 1.0, length(q));
+}
+
+// Both eyes, but only low over the nose bridge (the frown lines above it stay out).
+float glassesArea(vec2 p) {
+  vec2 d = (p - 0.5 * (uGlassR + uGlassL)) / uGlassEd;
+  float across = abs(dot(d, uGlassAx));
+  float up = dot(d, vec2(uGlassAx.y, -uGlassAx.x));
+  float bridge = (1.0 - smoothstep(0.15, 0.3, across)) * smoothstep(0.1, 0.18, up);
+  return max(glassZone(p, uGlassR), glassZone(p, uGlassL)) * (1.0 - bridge);
+}
+
 void main() {
   vec2 fuv = vec2(gl_FragCoord.x / uViewport.x, 1.0 - gl_FragCoord.y / uViewport.y);
   vec3 src = transfer(texture(uSrc, vSrcUV).rgb);
@@ -225,7 +392,17 @@ void main() {
   vec3 frameLow = textureLod(uFrame, fuv, uFrameLod).rgb;
   // Photo detail + the room's shading on your face + your live skin highlights.
   vec3 col = src + (frameLow - srcLow) * uShading + (frame - frameLow) * uDetail;
-  outColor = vec4(clamp(col, 0.0, 1.0), vAlpha * uStrength);
+  float alpha = vAlpha;
+  if (uCamGlasses > 0.0) {
+    // Your glasses rims (thin dark lines in the glasses area) stay on top.
+    vec2 fpx = vec2(gl_FragCoord.x, uViewport.y - gl_FragCoord.y);
+    float z = glassesArea(fpx);
+    if (z > 0.0) {
+      float dark = dot(textureLod(uFrame, fuv, uGlassLod).rgb - frame, vec3(0.299, 0.587, 0.114));
+      alpha *= 1.0 - uCamGlasses * z * smoothstep(0.07, 0.15, dark);
+    }
+  }
+  outColor = vec4(clamp(col, 0.0, 1.0), alpha * uStrength);
 }`;
 
 function compile(gl, type, source) {
@@ -275,6 +452,7 @@ export class LiteFaceAI {
     this.appliedRef = null;
     this.source = null; // { width, height, points: Float32Array (px), tris: Uint16Array, feather, stats }
     this.dstStats = null;
+    this.camGlasses = 0;
     this.frame = 0;
     this.lastTs = 0;
     this.lastResultAt = 0;
@@ -406,7 +584,7 @@ export class LiteFaceAI {
       fSrcUV: gl.getAttribLocation(this.faceProgram, 'aSrcUV'),
       fAlpha: gl.getAttribLocation(this.faceProgram, 'aAlpha'),
     };
-    for (const name of ['uSrc', 'uFrame', 'uViewport', 'uSrcMean', 'uSrcStd', 'uDstMean', 'uDstStd', 'uSrcLod', 'uFrameLod', 'uShading', 'uDetail', 'uStrength']) {
+    for (const name of ['uSrc', 'uFrame', 'uViewport', 'uSrcMean', 'uSrcStd', 'uDstMean', 'uDstStd', 'uSrcLod', 'uFrameLod', 'uShading', 'uDetail', 'uStrength', 'uCamGlasses', 'uGlassEd', 'uGlassLod', 'uGlassR', 'uGlassL', 'uGlassAx']) {
       this.loc[name] = gl.getUniformLocation(this.faceProgram, name);
     }
   }
@@ -452,6 +630,19 @@ export class LiteFaceAI {
     const oval = FACE_OVAL.map(pt);
     const holes = HOLES.map((ring) => ring.map(pt));
 
+    // A triangle joining the upper and lower lid/lip would stretch across your eye or mouth
+    // when it opens wider than the photo's (closed or narrow in the photo).
+    const side = new Int8Array(MESH_POINTS * HOLES.length);
+    HOLE_SIDES.forEach(([upper, lower], k) => {
+      for (const v of upper) side[k * MESH_POINTS + v] = 1;
+      for (const v of lower) side[k * MESH_POINTS + v] = 2;
+    });
+    const spansHole = (a, b, c) =>
+      HOLES.some((_, k) => {
+        const m = side[k * MESH_POINTS + a] | side[k * MESH_POINTS + b] | side[k * MESH_POINTS + c];
+        return m === 3;
+      });
+
     // Fixed topology from the photo: never re-triangulated, so the mesh can't flicker.
     const del = new Delaunator(points);
     const tris = [];
@@ -461,6 +652,7 @@ export class LiteFaceAI {
       const cy = (points[a * 2 + 1] + points[b * 2 + 1] + points[c * 2 + 1]) / 3;
       if (!inPolygon(cx, cy, oval)) continue; // outside the face
       if (holes.some((h) => inPolygon(cx, cy, h))) continue; // your real eyes and mouth show through
+      if (TUNE.spanCut && spansHole(a, b, c)) continue;
       tris.push(a, b, c);
     }
 
@@ -470,8 +662,13 @@ export class LiteFaceAI {
     for (let i = 0; i < MESH_POINTS; i += 1) {
       const [x, y] = pt(i);
       const edge = inPolygon(x, y, oval) ? distToPolygonEdge(x, y, oval) / faceWidth : 0;
-      let a = smoothstep(0.0, 0.09, edge);
-      for (const h of holes) a = Math.min(a, smoothstep(0.0, 0.035, distToPolygonEdge(x, y, h) / faceWidth));
+      let a = smoothstep(0.0, Math.max(1e-4, TUNE.feather), edge);
+      holes.forEach((h, k) => {
+        const mouth = k === 2;
+        const d = distToPolygonEdge(x, y, h) / faceWidth;
+        const w = Math.max(1e-4, mouth ? TUNE.mouthFeather : TUNE.holeFeather);
+        a = Math.min(a, mouth ? smoothstep(0.0, w, d) : TUNE.eyeEdge + (1 - TUNE.eyeEdge) * smoothstep(0.0, w, d));
+      });
       feather[i] = a;
     }
     const srcAreas = new Float32Array(tris.length / 3);
@@ -556,6 +753,14 @@ export class LiteFaceAI {
     const data = this.smallCtx.getImageData(0, 0, this.small.width, this.small.height).data;
     const oval = FACE_OVAL.map((i) => [points[i * 2] * sx, points[i * 2 + 1] * sy]);
     const stats = labStats(data, this.small.width, this.small.height, oval);
+    if (!TUNE.glassesCam) this.camGlasses = 0;
+    else if (!this.dstStats || this.frame % 16 === 0) {
+      // Your own glasses (checked from the camera picture about twice a second, smoothed so it
+      // doesn't flicker).
+      this.camGlassesScore = detectGlasses(this.input, output.width, output.height, eyeFrame((i) => [points[i * 2], points[i * 2 + 1]]));
+      const g = smoothstep(GLASSES_LO, GLASSES_HI, this.camGlassesScore);
+      this.camGlasses = this.dstStats ? this.camGlasses * 0.5 + g * 0.5 : g;
+    }
     if (stats) this.dstStats = stats;
   }
 
@@ -620,6 +825,16 @@ export class LiteFaceAI {
     gl.uniform1f(this.loc.uShading, TUNE.shading);
     gl.uniform1f(this.loc.uDetail, TUNE.detail);
     gl.uniform1f(this.loc.uStrength, 1.0);
+    const camGlasses = this.camGlasses > 0.05 ? this.camGlasses : 0;
+    gl.uniform1f(this.loc.uCamGlasses, camGlasses);
+    if (camGlasses) {
+      const eyes = eyeFrame((i) => [points[i * 2], points[i * 2 + 1]]);
+      gl.uniform2fv(this.loc.uGlassR, eyes.r);
+      gl.uniform2fv(this.loc.uGlassL, eyes.l);
+      gl.uniform2fv(this.loc.uGlassAx, eyes.ax);
+      gl.uniform1f(this.loc.uGlassEd, eyes.ed);
+      gl.uniform1f(this.loc.uGlassLod, Math.max(0, Math.log2(0.15 * eyes.ed)));
+    }
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.faceBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
