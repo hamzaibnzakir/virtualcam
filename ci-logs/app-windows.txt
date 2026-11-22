@@ -24,18 +24,18 @@ Downloading Electron binary...
     {
       "step": "ai-without-key",
       "aiState": "needs-key",
-      "fps": 32,
+      "fps": 17,
       "ready": true,
       "message": "",
       "pixel": [
-        3,
-        27,
-        17
+        7,
+        24,
+        20
       ]
     },
     {
       "step": "card",
-      "fps": 32,
+      "fps": 24,
       "ready": true,
       "message": "",
       "pixel": [
@@ -47,25 +47,25 @@ Downloading Electron binary...
     {
       "step": "panic",
       "override": true,
-      "fps": 31,
+      "fps": 18,
       "ready": true,
       "message": "",
       "pixel": [
-        217,
-        242,
-        218
+        224,
+        237,
+        226
       ]
     },
     {
       "step": "new-scene-nametag",
       "scenes": 6,
-      "fps": 30,
+      "fps": 13,
       "ready": true,
       "message": "",
       "pixel": [
-        211,
-        246,
-        211
+        216,
+        243,
+        217
       ]
     },
     {
@@ -87,13 +87,13 @@ Downloading Electron binary...
       "step": "ai-bad-key",
       "aiState": "error",
       "toast": "Could not start AI: Invalid API key",
-      "fps": 17,
+      "fps": 10,
       "ready": true,
       "message": "",
       "pixel": [
         210,
         247,
-        210
+        211
       ]
     },
     {
@@ -119,24 +119,24 @@ Downloading Electron binary...
       "delegate": "GPU",
       "faceFound": true,
       "frames": 11,
-      "ms": 115,
-      "fps": 7
+      "ms": 192,
+      "fps": 4
     },
     {
       "step": "model-download",
       "ok": true,
-      "seconds": 18
+      "seconds": 17
     },
     {
       "step": "local-swap",
       "models": true,
       "aiState": "generating",
       "provider": "cpu",
-      "gpuFallback": "dml: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFF595BA880: (caller: 00007FFF595BAB8A) Exception(1) tid(2260) C0262002 Specified display adapter handle is invalid.\r\n",
+      "gpuFallback": "dml: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFBB5D9A880: (caller: 00007FFBB5D9AB8A) Exception(1) tid(22c4) C0262002 Specified display adapter handle is invalid.\r\n",
       "swapped": true,
       "live": true,
       "meanFaceChange": 8,
-      "ms": 4479,
+      "ms": 6558,
       "hardware": "cpu-only"
     },
     {
@@ -158,12 +158,12 @@ Downloading Electron binary...
 }
 Quick switcher: [switcher] rows=5
 Console warnings: [
-  'W1122 07:37:47.984000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1122 07:37:48.025999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1122 07:37:48.132999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1122 07:37:48.153999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1122 07:37:48.243000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1122 07:37:48.259000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.'
+  'W1122 07:58:47.076999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1122 07:58:47.132999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 07:58:47.353999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1122 07:58:47.380999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1122 07:58:47.524999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1122 07:58:47.552999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.'
 ]
 SMOKE PASSED
 
