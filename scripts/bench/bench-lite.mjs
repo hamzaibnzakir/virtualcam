@@ -2,6 +2,7 @@
 //
 //   node scripts/bench/bench-lite.mjs [--split train|holdout|all] [--limit N] [--engine lite|local|original]
 //        [--params '{"shading":0.3}'] [--out DIR] [--images N] [--frames N] [--quiet]
+//        [--motion [--motion-frames 30] [--motion-score 4] [--motion-noise 3] [--motion-dropout 2] [--motion-zoom 1]]
 //
 // Shared data (set these to reuse downloads between runs and worktrees):
 //   BENCH_FACES   folder with the SFHQ sample jpgs   (downloaded if missing)
@@ -34,6 +35,18 @@ const params = JSON.parse(arg('params', '{}'));
 const frames = Number(arg('frames', '4'));
 const imageCount = Number(arg('images', '0'));
 const quiet = flag('quiet');
+// Motion mode (off by default; lite only): each pair moves over ~30 frames like a live camera. See motion.cjs.
+const motion = flag('motion')
+  ? {
+      frames: Number(arg('motion-frames', '30')),
+      score: Number(arg('motion-score', '4')), // frames scored for identity, besides the still start
+      noise: Number(arg('motion-noise', '3')), // camera sensor noise, in 0-255 levels
+      dropout: Number(arg('motion-dropout', '2')), // black frames after the move (0 = none)
+      zoom: Number(arg('motion-zoom', '1')), // face size vs the still benchmark (0.5 = a face further away)
+      warmup: 8,
+    }
+  : null;
+if (motion && engine !== 'lite') throw new Error('--motion needs --engine lite');
 const out = resolve(arg('out', join(tmpdir(), `lite-bench-${Date.now()}`)));
 const cacheRoot = resolve(process.env.BENCH_CACHE || join(root, '.bench-cache'));
 const facesDir = resolve(process.env.BENCH_FACES || join(cacheRoot, 'faces'));
@@ -97,7 +110,7 @@ async function render(mode, renderPairs) {
   symlinkSync(join(root, 'assets/mediapipe/face_landmarker.task'), join(dist, 'mediapipe', 'face_landmarker.task'));
 
   const configFile = join(out, 'config.json');
-  writeFileSync(configFile, JSON.stringify({ mode, pairs: renderPairs, params, frames, facesDir, outDir: out, assetsDir: dist }));
+  writeFileSync(configFile, JSON.stringify({ mode, pairs: renderPairs, params, frames, facesDir, outDir: out, assetsDir: dist, ...(motion ? { motion } : {}) }));
   const electron = require('electron');
   let cmd = electron;
   let args = [join(here, 'electron-main.cjs')];
@@ -127,6 +140,84 @@ if (engine === 'lite') rendered = await render('lite', pairs);
 else if (needInputs || engine === 'local') {
   // Other engines only need the inputs; local also needs the raw frames every time.
   await render('inputs', pairs.map((p) => ({ ...p, writeOrig: p.writeOrig || engine === 'local', writeRef: p.writeRef || engine === 'local' })));
+}
+
+// ---------- motion mode: landmark accuracy over the moving frames, identity on a few of them ----------
+if (motion) {
+  const { pairMetrics, summariseMotion } = require('./motion.cjs');
+  const avg = (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined);
+  const rows = [];
+  for (const [index, p] of pairs.entries()) {
+    const id = `${p.split}:${p.target}`;
+    const r = rendered.results.find((x) => x.id === id) || {};
+    const row = { id, ref: p.ref, state: r.state, renderMs: r.renderMs };
+    const trackFile = join(out, `${p.target}.motion.json`);
+    if (!r.motion || r.motion.error || !existsSync(trackFile)) {
+      row.error = (r.motion && r.motion.error) || `no output (${r.state || 'not rendered'})`;
+      rows.push(row);
+      continue;
+    }
+    Object.assign(row, pairMetrics(JSON.parse(readFileSync(trackFile, 'utf8'))));
+    const ref = await scorer.cached(key('ref', p), () => scorer.analyse(readRgba(join(out, `${p.ref}.ref.rgba`)), 512, 512));
+    row.frames = [];
+    for (const k of r.motion.scored) {
+      const base = join(out, `${p.target}.m${k}`);
+      const o = await scorer.analyse(readRgba(`${base}.out.rgba`), W, H);
+      const g = await scorer.analyse(readRgba(`${base}.orig.rgba`), W, H);
+      const fr = { k };
+      if (o && g && ref) Object.assign(fr, { idRef: cos(o.emb, ref.emb), idOrig: cos(o.emb, g.emb), pose: poseError(o.kps, g.kps) });
+      else fr.error = 'no face';
+      row.frames.push(fr);
+      if (index >= imageCount) for (const kind of ['out', 'orig']) rmSync(`${base}.${kind}.rgba`, { force: true });
+    }
+    const still = row.frames.find((f) => f.k === 0 && f.idRef !== undefined);
+    const moving = row.frames.filter((f) => f.k > 0 && f.idRef !== undefined);
+    if (still) row.idRef0 = still.idRef;
+    if (moving.length) {
+      row.idRefFrames = avg(moving.map((f) => f.idRef));
+      row.idRefFramesMin = Math.min(...moving.map((f) => f.idRef));
+      row.idOrigFrames = avg(moving.map((f) => f.idOrig));
+      row.poseFrames = avg(moving.map((f) => f.pose));
+    }
+    rows.push(row);
+  }
+  const summary = { engine, split, params, motion, ...summariseMotion(rows) };
+  const ms = rows.map((r) => r.renderMs).filter((v) => v !== undefined);
+  if (ms.length) summary.renderMsMedian = ms.sort((a, b) => a - b)[Math.floor(ms.length / 2)];
+  writeFileSync(join(out, 'results.json'), JSON.stringify({ summary, rows }, null, 2));
+  if (imageCount > 0) {
+    // One row per pair: the photo, then camera and result side by side at each scored frame.
+    const pick = rows.filter((r) => r.frames).slice(0, imageCount);
+    const script = `
+import sys, json, os
+from PIL import Image, ImageDraw
+out, faces, W, H = sys.argv[1], sys.argv[2], 1280, 720
+rows = json.loads(sys.argv[3]); pairs = {p['split']+':'+p['target']: p for p in json.loads(sys.argv[4])}
+tile = 200
+cols = 1 + 2 * max(len(r['frames']) for r in rows)
+sheet = Image.new('RGB', (tile * cols, tile * len(rows)), (0, 0, 0))
+d = ImageDraw.Draw(sheet)
+for i, r in enumerate(rows):
+    p = pairs[r['id']]; f = p['frame']; m = f['size'] * 0.18
+    box = (int(f['x'] - m), int(f['y'] - m), int(f['x'] + f['size'] + m), int(f['y'] + f['size'] + m))
+    sheet.paste(Image.open(faces + '/' + p['ref']).convert('RGB').resize((tile, tile)), (0, i * tile))
+    for j, fr in enumerate(r['frames']):
+        for c, kind in enumerate(['orig', 'out']):
+            fn = out + '/' + p['target'] + '.m%d.%s.rgba' % (fr['k'], kind)
+            if not os.path.exists(fn): continue
+            im = Image.frombytes('RGBA', (W, H), open(fn, 'rb').read()).convert('RGB')
+            x = tile * (1 + 2 * j + c)
+            sheet.paste(im.crop(box).resize((tile, tile)), (x, i * tile))
+            if kind == 'out':
+                d.rectangle([x, i * tile, x + 120, i * tile + 16], fill=(0, 0, 0))
+                d.text((x + 3, i * tile + 3), 'k%d id %s' % (fr['k'], ('%.2f' % fr['idRef']) if 'idRef' in fr else '-'), fill=(255, 255, 0))
+sheet.save(out + '/motion.jpg', quality=88)
+`;
+    spawnSync('python3', ['-c', script, out, facesDir, JSON.stringify(pick), JSON.stringify(pairs)], { stdio: 'inherit' });
+    summary.images = join(out, 'motion.jpg');
+  }
+  console.log(JSON.stringify(summary));
+  process.exit(0);
 }
 
 // ---------- score ----------

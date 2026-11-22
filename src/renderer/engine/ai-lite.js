@@ -1,6 +1,7 @@
 // Lite engine: "wear" the face from a photo with no generative AI, so it runs on almost any PC.
 //
-//   1. Track 478 face points with MediaPipe (small, runs on the CPU), smoothed with a one-euro filter.
+//   1. Track 478 face points with MediaPipe (small, runs on the CPU). The face's shape is smoothed in
+//      the head's own frame, so the head's moves aren't delayed; brief tracking losses fade, not pop.
 //   2. Warp the photo's face onto yours with a fixed triangle mesh built once from the photo,
 //      leaving holes for your real eyes and mouth so blinks, speech and teeth stay yours.
 //   3. In a WebGL shader: match the photo's colours to your camera in LAB space, take the room's
@@ -16,7 +17,26 @@ const FRESH_MS = 1000;
 //   detail:   how much of the camera's fine skin detail/highlights is added back
 //   blurDiv:  lighting blur radius = face width / blurDiv
 //   contrast: 0 = take the camera's colour contrast, 1 = keep the photo's
-export const liteTuning = { shading: 0.2, detail: 0.05, blurDiv: 10, contrast: 0.5 };
+//   minCutoff, beta, dCutoff: one-euro smoothing of the face's shape in the head's own frame (Hz when
+//             still; extra Hz per eye distance/s of shape change; Hz for the speed estimate)
+//   turnLo, turnHi: a triangle fades out as its size falls from turnHi to turnLo of the photo's
+//                   (it is turning away from the camera)
+//   holdMs:   when tracking drops out, keep the last points this long while the face fades out
+//   fadeInMs, fadeOutMs: how long the face takes to fade in when found and out when lost
+export const liteTuning = {
+  shading: 0.2,
+  detail: 0.05,
+  blurDiv: 10,
+  contrast: 0.5,
+  minCutoff: 2,
+  beta: 12,
+  dCutoff: 1,
+  turnLo: 0.05,
+  turnHi: 0.35,
+  holdMs: 250,
+  fadeInMs: 150,
+  fadeOutMs: 200,
+};
 const TUNE = liteTuning;
 const MESH_POINTS = 468; // 0..467 are the face; 468..477 are the irises
 const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
@@ -30,8 +50,11 @@ const HOLES = [RIGHT_EYE, LEFT_EYE, INNER_LIPS];
 function inPolygon(x, y, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
-    const [xi, yi] = poly[i];
-    const [xj, yj] = poly[j];
+    // Indexing, not destructuring: this runs for every pixel of the colour sample, and is ~10x faster.
+    const xi = poly[i][0];
+    const yi = poly[i][1];
+    const xj = poly[j][0];
+    const yj = poly[j][1];
     if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
@@ -105,20 +128,29 @@ function labStats(data, width, height, poly) {
   return { mean, std };
 }
 
-// ---------- one-euro filter: steady when still, instant when you move ----------
+// ---------- smoothing: steady when still, no added delay when the head moves ----------
+// MediaPipe already smooths its points a little in video mode, and filtering each point on its own
+// adds more delay whenever the head moves. So each frame's points are split into the head's move
+// (position, roll and size: a similarity fit to a template, made steady by all 468 points together)
+// and the face's shape in the head's own frame. Only the shape is smoothed, with a one-euro filter per
+// point (steady when still, quick when the shape changes, as when you talk or turn); the head's move
+// passes straight through. Shape speeds are in eye distances per second, so near and far faces match.
 
-class OneEuro {
-  constructor({ minCutoff = 1.2, beta = 0.06, dCutoff = 1.0 } = {}) {
-    this.minCutoff = minCutoff;
-    this.beta = beta;
-    this.dCutoff = dCutoff;
-    this.x = null;
-    this.dx = null;
-    this.t = 0;
+function eyeDistance(p) {
+  const rx = (p[33 * 2] + p[133 * 2]) / 2;
+  const ry = (p[33 * 2 + 1] + p[133 * 2 + 1]) / 2;
+  const lx = (p[362 * 2] + p[263 * 2]) / 2;
+  const ly = (p[362 * 2 + 1] + p[263 * 2 + 1]) / 2;
+  return Math.hypot(lx - rx, ly - ry);
+}
+
+class ShapeFilter {
+  constructor() {
+    this.tpl = null;
   }
 
   reset() {
-    this.x = null;
+    this.tpl = null;
   }
 
   static alpha(cutoff, dt) {
@@ -127,22 +159,110 @@ class OneEuro {
   }
 
   filter(values, tMs) {
-    if (!this.x || this.x.length !== values.length) {
-      this.x = Float32Array.from(values);
-      this.dx = new Float32Array(values.length);
-      this.t = tMs;
-      return this.x;
+    const len = values.length;
+    const n = len / 2;
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < len; i += 2) {
+      cx += values[i];
+      cy += values[i + 1];
     }
-    const dt = Math.max(1e-3, (tMs - this.t) / 1000);
+    cx /= n;
+    cy /= n;
+    const first = !this.tpl || this.tpl.length !== len;
+    if (first) {
+      // The template: this first frame, centred, with an eye distance of 1.
+      const eye = eyeDistance(values) || 1;
+      this.tpl = new Float64Array(len);
+      this.tplNorm = 0;
+      for (let i = 0; i < len; i += 2) {
+        this.tpl[i] = (values[i] - cx) / eye;
+        this.tpl[i + 1] = (values[i + 1] - cy) / eye;
+        this.tplNorm += this.tpl[i] * this.tpl[i] + this.tpl[i + 1] * this.tpl[i + 1];
+      }
+      this.shape = new Float64Array(len);
+      this.x = new Float64Array(len);
+      this.dx = new Float64Array(len);
+      this.out = new Float32Array(len);
+    }
+    // The head's move: points - centre = [a -b; b a] * template (least squares).
+    let sa = 0;
+    let sb = 0;
+    for (let i = 0; i < len; i += 2) {
+      const qx = this.tpl[i];
+      const qy = this.tpl[i + 1];
+      const px = values[i] - cx;
+      const py = values[i + 1] - cy;
+      sa += qx * px + qy * py;
+      sb += qx * py - qy * px;
+    }
+    const a = sa / this.tplNorm;
+    const b = sb / this.tplNorm;
+    const s2 = a * a + b * b || 1;
+    // The face's shape in the head's frame.
+    const shape = this.shape;
+    for (let i = 0; i < len; i += 2) {
+      const px = values[i] - cx;
+      const py = values[i + 1] - cy;
+      shape[i] = (a * px + b * py) / s2;
+      shape[i + 1] = (-b * px + a * py) / s2;
+    }
+    if (first) {
+      this.x.set(shape);
+    } else {
+      const dt = Math.max(1e-3, (tMs - this.t) / 1000);
+      const ad = ShapeFilter.alpha(TUNE.dCutoff, dt);
+      for (let i = 0; i < len; i += 2) {
+        this.dx[i] = ad * ((shape[i] - this.x[i]) / dt) + (1 - ad) * this.dx[i];
+        this.dx[i + 1] = ad * ((shape[i + 1] - this.x[i + 1]) / dt) + (1 - ad) * this.dx[i + 1];
+        const speed = Math.sqrt(this.dx[i] * this.dx[i] + this.dx[i + 1] * this.dx[i + 1]);
+        const al = ShapeFilter.alpha(TUNE.minCutoff + TUNE.beta * speed, dt);
+        this.x[i] = al * shape[i] + (1 - al) * this.x[i];
+        this.x[i + 1] = al * shape[i + 1] + (1 - al) * this.x[i + 1];
+      }
+    }
     this.t = tMs;
-    const ad = OneEuro.alpha(this.dCutoff, dt);
-    for (let i = 0; i < values.length; i += 1) {
-      const d = (values[i] - this.x[i]) / dt;
-      this.dx[i] = ad * d + (1 - ad) * this.dx[i];
-      const a = OneEuro.alpha(this.minCutoff + this.beta * Math.abs(this.dx[i]), dt);
-      this.x[i] = a * values[i] + (1 - a) * this.x[i];
+    // Smoothed shape, placed by this frame's head move.
+    for (let i = 0; i < len; i += 2) {
+      this.out[i] = cx + a * this.x[i] - b * this.x[i + 1];
+      this.out[i + 1] = cy + b * this.x[i] + a * this.x[i + 1];
     }
-    return this.x;
+    return this.out;
+  }
+}
+
+// The points to draw each frame: smoothed while tracked; when tracking drops out, the last good
+// points are kept for a moment while the face fades out, and a face that (re)appears fades in.
+export class PointSmoother {
+  constructor() {
+    this.shapeFilter = new ShapeFilter();
+    this.reset();
+  }
+
+  reset() {
+    this.shapeFilter.reset();
+    this.points = null;
+    this.strength = 0; // face opacity, 0..1
+    this.seenAt = -Infinity;
+    this.lastT = null;
+  }
+
+  // raw: this frame's tracked points (px) or null when no face was found; t: frame time (ms).
+  update(raw, t) {
+    const dt = this.lastT === null ? 1000 / 30 : Math.min(100, Math.max(0, t - this.lastT));
+    this.lastT = t;
+    if (raw) {
+      this.points = this.shapeFilter.filter(raw, t);
+      this.seenAt = t;
+      this.strength = TUNE.fadeInMs > 0 ? Math.min(1, this.strength + dt / TUNE.fadeInMs) : 1;
+    } else if (this.points && t - this.seenAt < TUNE.holdMs) {
+      this.strength = TUNE.fadeOutMs > 0 ? Math.max(0, this.strength - dt / TUNE.fadeOutMs) : 0;
+    } else {
+      this.shapeFilter.reset();
+      this.points = null;
+      this.strength = 0;
+    }
+    return this.points;
   }
 }
 
@@ -281,7 +401,9 @@ export class LiteFaceAI {
     this.faceFound = false;
     this.stats = { ms: 0, fps: 0 };
     this.times = [];
-    this.smoother = new OneEuro();
+    this.smoother = new PointSmoother();
+    this.raw = new Float32Array(MESH_POINTS * 2); // this frame's tracked points before smoothing (px)
+    this.points = null; // the points drawn this frame
 
     this.input = document.createElement('canvas');
     this.input.width = output.width;
@@ -492,10 +614,12 @@ export class LiteFaceAI {
     return { width, height, points, tris: Uint16Array.from(tris), feather, srcAreas, stats, faceWidth };
   }
 
-  // Called by the compositor every frame.
-  tick(drawSource) {
+  // Called by the compositor every frame. frameTime (ms) is when the frame was captured; it defaults
+  // to now (the benchmark passes simulated 30 fps camera timestamps).
+  tick(drawSource, frameTime) {
     if (this.state !== 'generating' || !this.ready || !this.source) return;
     const started = performance.now();
+    const t = frameTime ?? started;
     if (this.input.width !== output.width || this.input.height !== output.height) {
       // Picture shape changed: follow it and restart smoothing (all points just moved).
       this.input.width = output.width;
@@ -506,7 +630,7 @@ export class LiteFaceAI {
       this.dstStats = null;
     }
     drawSource(this.inputCtx, output.width, output.height);
-    const ts = Math.max(this.lastTs + 1, Math.floor(started));
+    const ts = Math.max(this.lastTs + 1, Math.floor(t));
     this.lastTs = ts;
     let landmarks = null;
     try {
@@ -518,20 +642,19 @@ export class LiteFaceAI {
       return;
     }
 
-    let points = null;
+    const raw = this.raw;
     if (landmarks) {
-      const raw = new Float32Array(MESH_POINTS * 2);
       for (let i = 0; i < MESH_POINTS; i += 1) {
         raw[i * 2] = landmarks[i].x * output.width;
         raw[i * 2 + 1] = landmarks[i].y * output.height;
       }
-      points = this.smoother.filter(raw, started);
-      if (this.frame % 4 === 0 || !this.dstStats) this.updateDstStats(points);
-    } else {
-      this.smoother.reset();
     }
-    this.faceFound = Boolean(points);
-    this.render(points);
+    // While tracking is lost for a moment, the last good points stay (fading out).
+    const points = this.smoother.update(landmarks ? raw : null, t);
+    if (landmarks && (this.frame % 4 === 0 || !this.dstStats)) this.updateDstStats(points);
+    this.points = points;
+    this.faceFound = Boolean(landmarks);
+    this.render(points, this.smoother.strength);
     this.frame += 1;
 
     const now = performance.now();
@@ -559,7 +682,7 @@ export class LiteFaceAI {
     if (stats) this.dstStats = stats;
   }
 
-  render(points) {
+  render(points, strength = 1) {
     const gl = this.gl;
     gl.viewport(0, 0, output.width, output.height);
     gl.disable(gl.BLEND);
@@ -577,31 +700,47 @@ export class LiteFaceAI {
     gl.vertexAttribPointer(this.loc.qPos, 2, gl.FLOAT, false, 0, 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disableVertexAttribArray(this.loc.qPos);
-    if (!points || !this.dstStats) return;
+    if (!points || !this.dstStats || strength <= 0) return;
 
     // Then the photo's face, warped onto yours.
     const src = this.source;
     const tris = src.tris;
     const triCount = tris.length / 3;
-    const ovalTarget = FACE_OVAL.map((i) => points[i * 2]);
-    const targetWidth = Math.max(...ovalTarget) - Math.min(...ovalTarget);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (let k = 0; k < FACE_OVAL.length; k += 1) {
+      const x = points[FACE_OVAL[k] * 2];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    }
+    const targetWidth = maxX - minX;
     const scale2 = (targetWidth / src.faceWidth) ** 2;
-    const verts = new Float32Array(triCount * 3 * 5);
-    let o = 0;
+    // One vertex array per photo, reused every frame: x, y, photo u, v (fixed), alpha.
+    if (!src.verts) {
+      src.verts = new Float32Array(triCount * 3 * 5);
+      for (let v = 0; v < triCount * 3; v += 1) {
+        src.verts[v * 5 + 2] = src.points[tris[v] * 2] / src.width;
+        src.verts[v * 5 + 3] = src.points[tris[v] * 2 + 1] / src.height;
+      }
+    }
+    const verts = src.verts;
     for (let t = 0; t < triCount; t += 1) {
       const a = tris[t * 3];
       const b = tris[t * 3 + 1];
       const c = tris[t * 3 + 2];
       // Triangles that shrink or flip are turning away from the camera: fade them out.
       const ratio = triArea(points, a, b, c) / (src.srcAreas[t] * scale2 || 1);
-      const facing = smoothstep(0.15, 0.55, ratio);
-      for (const i of [a, b, c]) {
-        verts[o++] = points[i * 2];
-        verts[o++] = points[i * 2 + 1];
-        verts[o++] = src.points[i * 2] / src.width;
-        verts[o++] = src.points[i * 2 + 1] / src.height;
-        verts[o++] = src.feather[i] * facing;
-      }
+      const facing = smoothstep(TUNE.turnLo, TUNE.turnHi, ratio);
+      const o = t * 15;
+      verts[o] = points[a * 2];
+      verts[o + 1] = points[a * 2 + 1];
+      verts[o + 4] = src.feather[a] * facing;
+      verts[o + 5] = points[b * 2];
+      verts[o + 6] = points[b * 2 + 1];
+      verts[o + 9] = src.feather[b] * facing;
+      verts[o + 10] = points[c * 2];
+      verts[o + 11] = points[c * 2 + 1];
+      verts[o + 14] = src.feather[c] * facing;
     }
 
     gl.useProgram(this.faceProgram);
@@ -619,10 +758,15 @@ export class LiteFaceAI {
     gl.uniform1f(this.loc.uFrameLod, Math.max(0, Math.log2(targetWidth / TUNE.blurDiv)));
     gl.uniform1f(this.loc.uShading, TUNE.shading);
     gl.uniform1f(this.loc.uDetail, TUNE.detail);
-    gl.uniform1f(this.loc.uStrength, 1.0);
+    gl.uniform1f(this.loc.uStrength, strength);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.faceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+    if (this.faceBufferLength !== verts.length) {
+      gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+      this.faceBufferLength = verts.length;
+    } else {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, verts);
+    }
     const stride = 5 * 4;
     gl.enableVertexAttribArray(this.loc.fPos);
     gl.vertexAttribPointer(this.loc.fPos, 2, gl.FLOAT, false, stride, 0);
