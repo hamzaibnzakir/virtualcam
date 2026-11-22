@@ -29,16 +29,19 @@ Pick any camera in **Source → Camera**. Phone cameras are usually sharper, whi
 - **iPhone:** Camo (free, 720p) over the cable. Needs iTunes on the PC.
 - **Android 14+:** plug in, then choose **USB → Webcam** on the phone. On phones without that option, use DroidCam.
 
-## Becoming someone: the two AI engines
+## Becoming someone: three engines
 
 Drop a photo anywhere on the window (or click the photo box) and turn on **AI transform**.
 
-| | **Local · face swap** | **Cloud · face and clothes** |
-|---|---|---|
-| What changes | Your face becomes their face. Hair, clothes, body and moves stay yours. | Face, hair and outfit become theirs. Your moves and expressions drive it. |
-| Cost | Free, runs on your computer | Decart, $0.02 per second (about $1.20 per minute) |
-| Needs | A one-time 470 MB model download. A graphics card with 2 GB+ is recommended (any DirectX 12 GPU; your Dell's Quadro T2000 qualifies). | A Decart API key (Settings) and a good internet connection |
-| Extras | **Face detail boost**: sharper face, slower, 340 MB extra download | Type a look or pick a quick style instead of a photo |
+| | **Lite · face warp** | **Local · face swap** | **Cloud · face and clothes** |
+|---|---|---|---|
+| What changes | You wear the photo's face: its skin, brows and features are warped onto yours and matched to your lighting. Your eyes, mouth, hair and moves stay yours. You look like a blend. | Your face becomes their face. Hair, clothes, body and moves stay yours. | Face, hair and outfit become theirs. Your moves and expressions drive it. |
+| How alike (face-recognition score, 0 = stranger, 0.4+ = same person) | about 0.26 | about 0.73 | not measured (cloud) |
+| Cost | Free | Free | Decart, $0.02 per second (about $1.20 per minute) |
+| Needs | Nothing extra: ships with the app, tracks on the CPU, draws with WebGL. Runs on almost any PC. | A one-time 470 MB download. A graphics card with 2 GB+ is recommended (any DirectX 12 GPU; your Dell's Quadro T2000 qualifies). | A Decart API key (Settings) and a good connection |
+| Extras | | **Face detail boost**: sharper, slower, 340 MB extra | Type a look or pick a quick style instead of a photo |
+
+The Lite engine follows the classic no-generative-AI recipe. It tracks 478 face points with MediaPipe (a small model built for this) and smooths them with a one-euro filter. It warps the photo onto your face with a fixed triangle mesh built once from the photo, cut out around your eyes and mouth. A WebGL shader then matches colour in LAB space, takes the room's shading and your skin highlights from the camera (frequency separation), feathers the edges, and fades triangles as your head turns away.
 
 The app checks your graphics card and says whether local AI will run well. If AI stops or drops, the real picture shows instead. It never goes black. Your **voice is never touched**: VirtualCam is video only, so your microphone goes straight to the call.
 
@@ -58,9 +61,9 @@ Use your own face, characters, or people who have agreed to it. Don't use it to 
 ## How it's tested
 
 - `npm run smoke` launches the app hidden with a fake camera and exercises every scene type, panic mode, the output window, the quick switcher, a cloud connection with a bad key, and (with the test models) a real local face swap. It fails on any console error.
-- `node scripts/test-faceswap.cjs` checks swap quality with a face-recognition model: the swapped face must match the photo's identity.
+- `node scripts/test-faceswap.cjs` checks swap quality with a face-recognition model: the swapped face must match the photo's identity. `scripts/identity-score.cjs` gives the same score for any image (used to tune the Lite engine).
 - **GitHub Actions → Windows camera** builds the camera device (64-bit and 32-bit) and proves it end to end on Windows. It registers the camera, sends known colours, captures them back through DirectShow like a video app, and checks they arrive exactly. Log: `ci-logs/windows-camera.txt`.
-- **GitHub Actions → App on Windows** runs the real app on Windows. It installs the camera through the app, reads the app's picture back from the VirtualCam camera, downloads the models with the app's downloader, runs a local face swap, and builds the installer. Log: `ci-logs/app-windows.txt`.
+- **GitHub Actions → App on Windows** runs the real app on Windows. It installs the camera through the app, reads the app's picture back from the VirtualCam camera, runs the Lite face warp, downloads the models with the app's downloader, runs a local face swap, and builds the installer. Log: `ci-logs/app-windows.txt`.
 
 ## Project layout
 
@@ -77,6 +80,7 @@ src/main/faceswap/            local face swap engine (runs in its own process)
   onnx-initializer.js         reads the swap model's identity matrix
 src/renderer/                 the studio window
   engine/ai-local.js          talks to the local engine, composites swapped faces
+  engine/ai-lite.js           Lite engine: MediaPipe tracking + WebGL face warp
   engine/ai-decart.js         Decart realtime (cloud) adapter
   engine/compositor.js        draws the picture at 30 fps
 native/softcam/               the camera device (Softcam, MIT, renamed to VirtualCam)
@@ -88,4 +92,5 @@ vendor/win/                   tested camera binaries, committed by CI
 
 - Camera device: [Softcam](https://github.com/tshino/softcam) by tshino, MIT.
 - Face models are downloaded on first use. The InsightFace models (face finder, identity, inswapper) are licensed for **non-commercial use only**. GFPGAN is Apache-2.0. Selling VirtualCam with the local engine would need commercially licensed models.
+- Lite engine: [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) (Apache-2.0, bundled in `assets/mediapipe`) and [Delaunator](https://github.com/mapbox/delaunator) (ISC).
 - Cloud AI: [Decart](https://platform.decart.ai) realtime API.
