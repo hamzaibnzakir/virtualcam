@@ -1,7 +1,7 @@
 // Lite engine benchmark. Renders every pair with the real Lite engine, then scores it.
 //
 //   node scripts/bench/bench-lite.mjs [--split train|holdout|all] [--limit N] [--engine lite|local|original]
-//        [--params '{"shading":0.3}'] [--out DIR] [--images N] [--frames N] [--quiet]
+//        [--params '{"shading":0.3}'] [--out DIR] [--images N] [--frames N] [--only i,j,...] [--quiet]
 //
 // Shared data (set these to reuse downloads between runs and worktrees):
 //   BENCH_FACES   folder with the SFHQ sample jpgs   (downloaded if missing)
@@ -47,6 +47,9 @@ mkdirSync(out, { recursive: true });
 // ---------- data ----------
 const dataset = JSON.parse(readFileSync(join(here, 'dataset.json'), 'utf8'));
 let pairs = dataset.pairs.filter((p) => split === 'all' || p.split === split);
+// --only 3,17,40: just these pairs (indices within the split), e.g. to look at particular cases.
+const only = arg('only', '');
+if (only) pairs = only.split(',').map(Number).map((i) => pairs[i]).filter(Boolean);
 if (limit) pairs = pairs.slice(0, limit);
 
 if (!existsSync(join(facesDir, pairs[0].target))) {
