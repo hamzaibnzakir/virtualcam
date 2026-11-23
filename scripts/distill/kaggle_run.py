@@ -32,6 +32,10 @@ W = os.path.join(ROOT, 'working')
 TMP = os.environ.get('MODELS_DIR', '/tmp/vcam')
 LOCAL_TEST = os.environ.get('LOCAL_TEST') == '1'  # CPU, no pip: for checking this script off Kaggle
 STEPS = int(os.environ.get('STEPS', 60000))
+# The teacher's swaps for this many fixed pairs are worked out once (at most CACHE_HOURS) and reused by
+# later runs; training then skips the teacher, which was most of each step's time.
+TEACHER_CACHE = int(os.environ.get('TEACHER_CACHE', 40000))
+CACHE_HOURS = float(os.environ.get('CACHE_HOURS', 1.5))
 BATCH = int(os.environ.get('BATCH', 32))
 WIDTH = int(os.environ.get('WIDTH', 256))
 TRAIN_FACES = int(os.environ.get('TRAIN_FACES', 100000))
@@ -128,7 +132,8 @@ def previous(pattern):
 
 def main():
     os.makedirs(TMP, exist_ok=True)
-    say(f'settings: STEPS={STEPS} BATCH={BATCH} WIDTH={WIDTH} TRAIN_FACES={TRAIN_FACES} SESSION_HOURS={SESSION_HOURS}')
+    say(f'settings: STEPS={STEPS} BATCH={BATCH} WIDTH={WIDTH} TRAIN_FACES={TRAIN_FACES} SESSION_HOURS={SESSION_HOURS} '
+        f'TEACHER_CACHE={TEACHER_CACHE} CACHE_HOURS={CACHE_HOURS}')
     try:
         gpu = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'],
                              capture_output=True, text=True).stdout.strip()
@@ -186,9 +191,20 @@ def main():
         say(f'continuing from {ckpts[0]}')
     left = SESSION_HOURS - (time.time() - START) / 3600 - 0.6  # leave time to export and evaluate
     if left > 0.2:
-        run([sys.executable, os.path.join(kit, 'distill.py'), '--data', data['train'], '--models', models, '--out', out,
-             '--width', str(WIDTH), '--batch', str(BATCH), '--steps', str(STEPS), '--hours', f'{left:.2f}',
-             '--val-pairs', VAL_PAIRS], 'train')
+        cmd = [sys.executable, os.path.join(kit, 'distill.py'), '--data', data['train'], '--models', models, '--out', out,
+               '--width', str(WIDTH), '--batch', str(BATCH), '--steps', str(STEPS), '--hours', f'{left:.2f}',
+               '--val-pairs', VAL_PAIRS]
+        if TEACHER_CACHE > 0:
+            cmd += ['--teacher-cache', str(TEACHER_CACHE), '--cache-hours', str(CACHE_HOURS)]
+            cached = previous('run/teacher_cache.npz')
+            if cached:
+                cmd += ['--cache-from', cached[0]]
+                say(f'reusing the teacher cache from {cached[0]}')
+        run(cmd, 'train')
+    # How fast training went (for planning the next run).
+    for line in open(os.path.join(W, 'run.log')) if os.path.exists(os.path.join(W, 'run.log')) else []:
+        if line.startswith('step time') or 'teacher cache:' in line and 'built' in line:
+            status.setdefault('speed', []).append(line.strip())
     vals = [json.loads(l) for l in open(os.path.join(out, 'val.jsonl'))] if os.path.exists(os.path.join(out, 'val.jsonl')) else []
     step = vals[-1]['step'] if vals else 0
     save_status(step=step, steps_target=STEPS, last_val=vals[-1] if vals else None)

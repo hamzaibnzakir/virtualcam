@@ -13,6 +13,7 @@ import argparse
 import csv
 import glob
 import json
+import shutil
 import math
 import os
 import sys
@@ -56,6 +57,23 @@ def jitter(x, strength):
     return F.grid_sample(x, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
 
 
+def jitter_pair(a, b, strength):
+    """The same random shift, turn, zoom and flip for both batches (a camera face and its teacher swap)."""
+    if strength <= 0:
+        return a, b
+    n = a.shape[0]
+    ang = (torch.rand(n, device=a.device) * 2 - 1) * math.radians(4) * strength
+    scale = 1 + (torch.rand(n, device=a.device) * 2 - 1) * 0.05 * strength
+    shift = (torch.rand(n, 2, device=a.device) * 2 - 1) * 0.03 * strength
+    cos, sin = torch.cos(ang) / scale, torch.sin(ang) / scale
+    theta = torch.stack([torch.stack([cos, -sin, shift[:, 0]], 1), torch.stack([sin, cos, shift[:, 1]], 1)], 1)
+    grid = F.affine_grid(theta, a.shape, align_corners=False)
+    a = F.grid_sample(a, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
+    b = F.grid_sample(b, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
+    flip = (torch.rand(n, device=a.device) < 0.5)[:, None, None, None]
+    return torch.where(flip, a.flip(3), a), torch.where(flip, b.flip(3), b)
+
+
 def arc_input(x128):
     """Swap-layout 128 crop (0..1) -> ArcFace 112 crop (-1..1): the 128 layout is the 112 one shifted 8px right."""
     return x128[:, :, 0:112, 8:120] * 2 - 1
@@ -87,10 +105,15 @@ def main():
     ap.add_argument('--val-faces', type=int, default=1000, help='faces kept out of training for validation')
     ap.add_argument('--val-pairs', type=int, default=256)
     ap.add_argument('--workers-seed', type=int, default=0)
+    ap.add_argument('--teacher-cache', type=int, default=0,
+                    help='work out this many teacher swaps once and train on them (much faster steps); 0 = off')
+    ap.add_argument('--cache-hours', type=float, default=1.5, help='at most this long building the cache')
+    ap.add_argument('--cache-from', default='', help='a teacher_cache.npz from an earlier run to reuse')
     args = ap.parse_args()
 
     torch.manual_seed(args.workers_seed)
     dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    torch.backends.cudnn.benchmark = True  # same shapes every step: let cuDNN pick its fastest kernels
     # bfloat16 on cards that have it (RTX 30/40, A100, H100); float16 with loss scaling on older ones (T4, P100).
     if dev.type == 'cuda':
         half = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
@@ -179,6 +202,57 @@ def main():
         latent = F.normalize(src_emb @ emap, dim=1)
         return target, latent, src_emb
 
+    # Teacher cache: the teacher's swaps worked out once for fixed (camera face, identity) pairs. The
+    # teacher was most of each step's time; training then reads its answers instead of recomputing them.
+    cache = None
+    cache_file = os.path.join(args.out, 'teacher_cache.npz')
+    if args.teacher_cache > 0:
+        src = args.cache_from if args.cache_from and os.path.exists(args.cache_from) else cache_file
+        if os.path.exists(src):
+            d = np.load(src)
+            cache = dict(t=torch.from_numpy(d['t']), s=torch.from_numpy(d['s']), tea=torch.from_numpy(d['tea']))
+            print(f'teacher cache: {len(cache["t"])} pairs from {src}', flush=True)
+            if src != cache_file:
+                shutil.copy(src, cache_file)
+        else:
+            g = torch.Generator().manual_seed(4321)
+            n = args.teacher_cache
+            t_all = train_idx[torch.randint(len(train_idx), (n,), generator=g)]
+            s_all = train_idx[torch.randint(len(train_idx), (n,), generator=g)]
+            tea_all = np.zeros((n, 128, 128, 3), np.uint8)
+            started_cache = time.time()
+            done = 0
+            bs = 64
+            with torch.no_grad():
+                while done < n and time.time() - started_cache < args.cache_hours * 3600:
+                    t = t_all[done:done + bs]
+                    s = s_all[done:done + bs]
+                    target = store[t.to(store.device)].to(dev).permute(0, 3, 1, 2).float() / 255
+                    latent = F.normalize(emb_all[s.to(dev)] @ emap, dim=1)
+                    with torch.autocast(**teacher_amp):
+                        tea = teacher(target, latent).float()
+                    tea_all[done:done + len(t)] = (tea.clamp(0, 1) * 255 + 0.5).byte().permute(0, 2, 3, 1).cpu().numpy()
+                    done += len(t)
+                    if done % (bs * 50) == 0:
+                        rate = done / (time.time() - started_cache)
+                        print(f'teacher cache: {done}/{n} ({rate:.0f} pairs/s)', flush=True)
+            cache = dict(t=t_all[:done], s=s_all[:done], tea=torch.from_numpy(tea_all[:done]))
+            np.savez(cache_file, t=cache['t'].numpy(), s=cache['s'].numpy(), tea=tea_all[:done])
+            print(f'teacher cache: {done} pairs built in {(time.time() - started_cache) / 60:.1f} min', flush=True)
+        # On the GPU if there's room (40k pairs ~ 2 GB).
+        if dev.type == 'cuda' and cache['tea'].numel() < 0.25 * torch.cuda.get_device_properties(0).total_memory:
+            cache['tea'] = cache['tea'].to(dev)
+
+    def cached_batch(n):
+        k = torch.randint(len(cache['t']), (n,))
+        t, s = cache['t'][k], cache['s'][k]
+        target = store[t.to(store.device)].to(dev, non_blocking=True).permute(0, 3, 1, 2).float() / 255
+        tea = cache['tea'][k.to(cache['tea'].device)].to(dev, non_blocking=True).permute(0, 3, 1, 2).float() / 255
+        target, tea = jitter_pair(target, tea, args.jitter)
+        src_emb = emb_all[s.to(dev)]
+        latent = F.normalize(src_emb @ emap, dim=1)
+        return target, latent, src_emb, tea
+
     @torch.no_grad()
     def validate():
         g = torch.Generator().manual_seed(1234)
@@ -231,11 +305,29 @@ def main():
         writer.writerow(['step', 'loss', 'l1', 'lpips', 'id', 'lr', 'it_per_s', 'hours'])
     started = time.time()
     tick = time.time()
+    timing = dict(data=0.0, teacher=0.0, student=0.0, n=0)
+    sync = (lambda: torch.cuda.synchronize()) if dev.type == 'cuda' else (lambda: None)
     while step < args.steps:
         student.train()
-        target, latent, src_emb = batch(train_idx, args.batch, aug=True)
-        with torch.no_grad(), torch.autocast(**teacher_amp):
-            tea = teacher(target, latent).float()
+        measure = timing['n'] < 30 and step > 0  # time the parts of a few steps (after the first)
+        if measure:
+            sync()
+            p0 = time.time()
+        if cache is not None:
+            target, latent, src_emb, tea = cached_batch(args.batch)
+            if measure:
+                sync()
+                p1 = p2 = time.time()
+        else:
+            target, latent, src_emb = batch(train_idx, args.batch, aug=True)
+            if measure:
+                sync()
+                p1 = time.time()
+            with torch.no_grad(), torch.autocast(**teacher_amp):
+                tea = teacher(target, latent).float()
+            if measure:
+                sync()
+                p2 = time.time()
         with torch.autocast(**amp):
             stu = student(target, latent).float()
             l1 = F.l1_loss(stu, tea)
@@ -255,6 +347,16 @@ def main():
             for pe, ps in zip(ema.parameters(), student.parameters()):
                 pe.mul_(d).add_(ps.detach(), alpha=1 - d)
         step += 1
+        if measure:
+            sync()
+            p3 = time.time()
+            timing['data'] += p1 - p0
+            timing['teacher'] += p2 - p1
+            timing['student'] += p3 - p2
+            timing['n'] += 1
+            if timing['n'] == 30:
+                print('step time (s): ' + ', '.join(f'{k} {timing[k] / 30:.3f}' for k in ('data', 'teacher', 'student')) +
+                      (' (teacher from cache)' if cache is not None else ''), flush=True)
 
         if step % 100 == 0:
             rate = 100 / (time.time() - tick)
