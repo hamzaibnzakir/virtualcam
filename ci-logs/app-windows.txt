@@ -12,25 +12,25 @@ Downloading Electron binary...
   "steps": [
     {
       "step": "webcam",
-      "fps": 14,
-      "ready": true,
-      "message": "",
+      "fps": 30,
+      "ready": false,
+      "message": "Camera is busy in another app.",
       "pixel": [
-        8,
-        24,
-        21
+        16,
+        18,
+        24
       ]
     },
     {
       "step": "ai-without-key",
       "aiState": "needs-key",
-      "fps": 14,
+      "fps": 23,
       "ready": true,
       "message": "",
       "pixel": [
-        3,
-        27,
-        17
+        11,
+        21,
+        23
       ]
     },
     {
@@ -47,7 +47,7 @@ Downloading Electron binary...
     {
       "step": "panic",
       "override": true,
-      "fps": 17,
+      "fps": 18,
       "ready": true,
       "message": "",
       "pixel": [
@@ -63,9 +63,9 @@ Downloading Electron binary...
       "ready": true,
       "message": "",
       "pixel": [
-        219,
-        241,
-        219
+        220,
+        239,
+        223
       ]
     },
     {
@@ -88,7 +88,7 @@ Downloading Electron binary...
       "step": "ai-bad-key",
       "aiState": "error",
       "toast": "Could not start AI: Invalid API key",
-      "fps": 9,
+      "fps": 10,
       "ready": true,
       "message": "",
       "pixel": [
@@ -120,7 +120,7 @@ Downloading Electron binary...
       "delegate": "GPU",
       "faceFound": true,
       "frames": 11,
-      "ms": 204,
+      "ms": 181,
       "fps": 4
     },
     {
@@ -136,11 +136,11 @@ Downloading Electron binary...
       "models": true,
       "aiState": "generating",
       "provider": "cpu",
-      "gpuFallback": "graphics chip 1: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFAFE1CA880: (caller: 00007FFAFE1CAB8A) Exception(1) tid(e58) C0262002 Specified display adapter handle is",
+      "gpuFallback": "graphics chip 1: N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFE7794A880: (caller: 00007FFE7794AB8A) Exception(1) tid(216c) C0262002 Specified display adapter handle i",
       "swapped": true,
       "live": true,
       "meanFaceChange": 8,
-      "ms": 11392,
+      "ms": 11716,
       "hardware": "cpu-only",
       "gpus": [
         {
@@ -156,12 +156,12 @@ Downloading Electron binary...
       "tried": [
         {
           "device": "graphics chip 1",
-          "error": "N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFAFE1CA880: (caller: 00007FFAFE1CAB8A) Exception(1) tid(e58) C0262002 Specified display adapter handle is"
+          "error": "N:\\_work\\1\\s\\onnxruntime\\core\\providers\\dml\\dml_provider_factory.cc(522)\\onnxruntime.dll!00007FFE7794A880: (caller: 00007FFE7794AB8A) Exception(1) tid(216c) C0262002 Specified display adapter handle i"
         },
         {
           "device": "the processor",
-          "loadMs": 4860,
-          "swapMs": 7346
+          "loadMs": 4865,
+          "swapMs": 5540
         }
       ]
     },
@@ -183,7 +183,7 @@ Downloading Electron binary...
       },
       "camRuns": 1,
       "camFound": 0.0437,
-      "camOn": 0.0125,
+      "camOn": 0.0126,
       "camSize": [
         320,
         180
@@ -203,23 +203,23 @@ Downloading Electron binary...
       "videoSeg": true,
       "hideHair": true,
       "hairFillOn": true,
-      "hairCells": 2322,
+      "hairCells": 2326,
       "frameMs": {
-        "source": 0.046061922929863115,
-        "track": 223.87292188044964,
-        "outfit": 91.87933258014401,
-        "face": 0.1488709239157146,
-        "hair": 0.696046692115883,
-        "total": 316.641818012644
+        "source": 0.04761083247160025,
+        "track": 217.600933278809,
+        "outfit": 67.85626348595831,
+        "face": 0.15618556293754499,
+        "hair": 0.11822722363698006,
+        "total": 285.7787622645482
       },
-      "segMs": 452.79999999981374,
-      "fillMs": 42.199999999953434,
+      "segMs": 852.5,
+      "fillMs": 38,
       "fillParts": {
-        "pixels": 0,
-        "masks": 6,
-        "maths": 36
+        "pixels": 2,
+        "masks": 9,
+        "maths": 27
       },
-      "segRunMs": 405.80000000004657
+      "segRunMs": 809.5999999999767
     },
     {
       "step": "ai-voice",
@@ -229,23 +229,23 @@ Downloading Electron binary...
       "live": true,
       "loaded": {
         "device": "the processor",
-        "ms": 39
+        "ms": 38
       },
       "stats": {
         "type": "stats",
         "device": "the processor",
-        "steps": 12,
+        "steps": 15,
         "blockMs": 250,
-        "stepMs": 111,
+        "stepMs": 168,
         "speakerF0": 151,
         "shift": 4.9,
-        "delayMs": 421
+        "delayMs": 478
       },
       "playback": {
-        "buffered": 387,
-        "underruns": 2,
-        "chunksOut": 131,
-        "chunksIn": 10,
+        "buffered": 643,
+        "underruns": 3,
+        "chunksOut": 181,
+        "chunksIn": 14,
         "linked": true,
         "active": true,
         "input": true
@@ -268,10 +268,10 @@ Downloading Electron binary...
         "type": "stats",
         "engine": "my-voice",
         "device": "the processor",
-        "steps": 10,
+        "steps": 43,
         "blockMs": 240,
-        "stepMs": 145,
-        "delayMs": 475
+        "stepMs": 83,
+        "delayMs": 413
       },
       "messageSeconds": 2.98,
       "ok": true
@@ -287,7 +287,7 @@ Downloading Electron binary...
         "video": "1280x720",
         "brightness": 84,
         "audioLive": true,
-        "audioRms": 0.0964
+        "audioRms": 0.0966
       },
       "connected": true,
       "voiceRunning": true,
@@ -313,24 +313,26 @@ Downloading Electron binary...
 }
 Quick switcher: [switcher] rows=5
 Console warnings: [
-  'W1123 07:37:22.216999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1123 07:37:22.280000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1123 07:37:22.460999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1123 07:37:22.491000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1123 07:37:22.972000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1123 07:37:23.152000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1123 07:37:23.180999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1123 07:37:23.337999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1123 07:38:15.564999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1123 07:38:15.592999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1123 07:38:32.393999 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
-  'W1123 07:38:32.435000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1123 07:38:34.945999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1123 07:38:37.676999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
-  'W1123 07:38:38.217999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1123 07:38:38.262000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1123 07:38:38.332999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
-  'W1123 07:38:39.660000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1123 10:42:58.643000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1123 10:42:58.704999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1123 10:42:58.934000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1123 10:42:58.963000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1123 10:42:59.340000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1123 10:42:59.499000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1123 10:42:59.526000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1123 10:42:59.676999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1123 10:43:47.808000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1123 10:43:47.836000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1123 10:44:05.599000 2210688 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.',
+  'W1123 10:44:05.632999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1123 10:44:07.534000 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1123 10:44:08.912999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1123 10:44:09.439000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1123 10:44:09.479000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1123 10:44:09.563000 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1123 10:44:10.873999 2210688 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.',
+  'W1123 10:44:28.652999 2210688 gl_context.cc:1136] OpenGL error checking is disabled',
+  'W1123 10:44:30.968000 2210688 reusable_pool.h:148] Maximum number of pooled buffers reached (set to keep at most 2 buffers of the same type and size). MP buffer allocation patterns can be observed with Perfetto by inspecting the PerfettoScopedMemoryObjectCounters-based GpuBuffer and AhwbBuffer counters. Then consider adjusting the MultiPoolOptions.keep_count',
   '[calls] signal hello ',
   '[calls] Electron Security Warning (Insecure Content-Security-Policy) This renderer process has either no Content Security\n' +
     '  Policy set or a policy with "unsafe-eval" enabled. This exposes users of\n' +
@@ -341,11 +343,17 @@ Console warnings: [
     'This warning will not show up\n' +
     'once the app is packaged.',
   '[calls] signal answer ',
-  '[calls] signal candidate candidate:3340798419 1 udp 2122260223 10.1.0.106 57996 typ host generation 0 ufrag OvIs network-id 1',
-  '[calls] signal candidate candidate:965369159 1 tcp 1518280447 10.1.0.106 9 typ host tcptype active generation 0 ufrag OvIs network-id 1',
-  '[link] local candidate candidate:1960622571 1 tcp 1518280447 10.1.0.106 9 typ host tcptype active generation 0 ufrag 5fT8 network-id 1',
+  '[calls] signal candidate candidate:1512324250 1 udp 2122260223 10.1.0.35 55256 typ host generation 0 ufrag s+A1 network-id 1',
+  '[calls] signal candidate candidate:914844510 1 udp 2122194687 172.30.112.1 55257 typ host generation 0 ufrag s+A1 network-id 2',
+  '[calls] signal candidate candidate:619437570 1 tcp 1518280447 10.1.0.35 9 typ host tcptype active generation 0 ufrag s+A1 network-id 1',
+  '[calls] signal candidate candidate:1212713414 1 tcp 1518214911 172.30.112.1 9 typ host tcptype active generation 0 ufrag s+A1 network-id 2',
+  '[link] local candidate candidate:2840216782 1 tcp 1518280447 10.1.0.35 9 typ host tcptype active generation 0 ufrag 7ewt network-id 1',
+  '[link] local candidate candidate:3320386314 1 tcp 1518214911 172.30.112.1 9 typ host tcptype active generation 0 ufrag 7ewt network-id 2',
+  '[link] local candidate candidate:2840216782 1 tcp 1518280447 10.1.0.35 9 typ host tcptype active generation 0 ufrag 7ewt network-id 1',
+  '[link] local candidate candidate:3320386314 1 tcp 1518214911 172.30.112.1 9 typ host tcptype active generation 0 ufrag 7ewt network-id 2',
   '[link] ice checking',
-  '[link] local candidate candidate:2323017087 1 udp 2122260223 10.1.0.106 57997 typ host generation 0 ufrag 5fT8 network-id 1',
+  '[link] local candidate candidate:3615860310 1 udp 2122260223 10.1.0.35 55258 typ host generation 0 ufrag 7ewt network-id 1',
+  '[link] local candidate candidate:3139891602 1 udp 2122194687 172.30.112.1 55259 typ host generation 0 ufrag 7ewt network-id 2',
   '[link] ice connected',
   '[link] connection connecting',
   '[link] connection connected'
