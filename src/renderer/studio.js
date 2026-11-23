@@ -115,7 +115,9 @@ function composeLite() {
     liteView.height = h;
   }
   liteViewCtx.drawImage(lite.canvas, 0, 0);
-  if (lookWanted.outfit) look.drawOutfit(liteViewCtx, lite.input, w, h, performance.now(), lite.points);
+  const t = performance.now();
+  if (lookWanted.outfit) look.drawOutfit(liteViewCtx, lite.input, w, h, t, lite.points, { hideHair: lookWanted.hideHair });
+  if (lookWanted.hideHair && lite.points) look.hideOwnHair(liteViewCtx, lite.input, w, h, t, lite.points, { segmented: lookWanted.outfit });
   if (lookWanted.hair && lite.points) look.drawHair(liteViewCtx, lite.points, lite.smoother.strength);
 }
 
@@ -222,10 +224,14 @@ async function applyScene() {
   local.lookOpts = lookWanted;
   if (wantLook) {
     look
-      .preparePhoto(refKey, refBlob, { outfit: scene.ai.lookOutfit })
+      .preparePhoto(refKey, refBlob, { outfit: scene.ai.lookOutfit || (scene.ai.lookHair && scene.ai.hideOwnHair) })
       .then((found) => {
         if (token !== applyToken) return;
-        lookWanted = { hair: scene.ai.lookHair && look.hasHair, outfit: scene.ai.lookOutfit && look.hasOutfit };
+        lookWanted = {
+          hair: scene.ai.lookHair && look.hasHair,
+          outfit: scene.ai.lookOutfit && look.hasOutfit,
+          hideHair: scene.ai.lookHair && look.hasHair && scene.ai.hideOwnHair,
+        };
         local.lookOpts = lookWanted;
         if (scene.ai.lookHair && found && !look.hasHair) showToast('No hair found in that photo to copy.');
         if (scene.ai.lookOutfit && found && !look.hasOutfit) showToast('No clothes found in that photo to copy. A photo showing the shoulders and chest works best.');
@@ -366,6 +372,8 @@ function renderInspector() {
   $('cloud-look-note').hidden = scene.ai.engine !== 'cloud';
   setPressed($('toggle-look-hair'), scene.ai.lookHair);
   setPressed($('toggle-look-outfit'), scene.ai.lookOutfit);
+  setPressed($('toggle-hide-hair'), scene.ai.hideOwnHair);
+  $('hide-hair-row').hidden = !scene.ai.lookHair;
 
   setPressed($('toggle-nametag'), scene.nameTag.enabled);
   syncField($('tag-name'), scene.nameTag.name, sceneChanged);
@@ -1662,6 +1670,10 @@ function bindEvents() {
     activeScene().ai.lookHair = !activeScene().ai.lookHair;
     changed();
   });
+  $('toggle-hide-hair').addEventListener('click', () => {
+    activeScene().ai.hideOwnHair = !activeScene().ai.hideOwnHair;
+    changed();
+  });
   $('toggle-look-outfit').addEventListener('click', () => {
     activeScene().ai.lookOutfit = !activeScene().ai.lookOutfit;
     changed();
@@ -2038,7 +2050,7 @@ async function runSmokeTest() {
       const lookUntil = Date.now() + 60000;
       while (Date.now() < lookUntil && !(lookWanted.hair || lookWanted.outfit)) await wait(250);
       await wait(1500);
-      const lookStep = { step: 'look', photoRead: Boolean(look.photo), hair: look.hasHair, outfit: look.hasOutfit, wanted: { ...lookWanted }, cameraClothes: Boolean(look.camBox), measured: look.measured, camRuns: look.camRuns, camError: look.camError, camFound: look.camFound, camOn: look.camOn, camSize: look.camSize, camBox: look.camBox, photoBox: look.photo && look.photo.clothesBox, videoSeg: Boolean(look.videoSeg) };
+      const lookStep = { step: 'look', photoRead: Boolean(look.photo), hair: look.hasHair, outfit: look.hasOutfit, wanted: { ...lookWanted }, cameraClothes: Boolean(look.camBox), measured: look.measured, camRuns: look.camRuns, camError: look.camError, camFound: look.camFound, camOn: look.camOn, camSize: look.camSize, camBox: look.camBox, photoBox: look.photo && look.photo.clothesBox, videoSeg: Boolean(look.videoSeg), hideHair: Boolean(lookWanted.hideHair), hairFillOn: look.hairFillOn, hairCells: look.hairCells };
       if (api.smokeFiles.lookOut) {
         const png = await new Promise((r) => local.canvas.toBlob(r, 'image/png'));
         lookStep.saved = await api.smokeSave(api.smokeFiles.lookOut, new Uint8Array(await png.arrayBuffer()));

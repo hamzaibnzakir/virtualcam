@@ -6,3 +6,6 @@ release/
 .bench-cache/
 .claude/worktrees/
 __pycache__/
+testdata/faces/
+testdata/faces.zip
+testdata/*.png

@@ -378,13 +378,14 @@ export class LocalFaceAI {
 
     // The live picture, with the latest swapped face bent onto where your face is now.
     this.ctx.drawImage(this.input, 0, 0);
-    if (this.look && this.lookOpts.outfit) this.look.drawOutfit(this.ctx, this.input, width, height, t, points);
+    if (this.look && this.lookOpts.outfit) this.look.drawOutfit(this.ctx, this.input, width, height, t, points, { hideHair: this.lookOpts.hideHair });
     if (points && this.warp.hasFace) {
       this.warp.draw(width, height, points, t);
       this.ctx.globalAlpha = this.smoother.strength;
       this.ctx.drawImage(this.warp.canvas, 0, 0);
       this.ctx.globalAlpha = 1;
     }
+    if (this.look && this.lookOpts.hideHair && points) this.look.hideOwnHair(this.ctx, this.input, width, height, t, points, { segmented: this.lookOpts.outfit });
     if (this.look && this.lookOpts.hair && points) this.look.drawHair(this.ctx, points, this.smoother.strength);
     this.lastTickAt = t;
 

@@ -2,14 +2,19 @@
 //   - hair: the photo's hair is cut out once (MediaPipe multiclass segmentation) and placed on your
 //     head every frame, following the face tracker;
 //   - outfit: the photo's clothes are cut out once; your own clothes are found in the camera picture
-//     a few times a second, and the photo's clothes are stretched over them, kept inside their outline.
+//     a few times a second, and the photo's clothes are stretched over them, kept inside their outline;
+//   - your own hair (optional, with the photo's hair): found in the camera picture with the same tool
+//     and painted over with the background behind you (remembered from frames where it showed),
+//     except over your face.
 // Both engines that track your face (Lite and Local AI) use this.
 import { FaceLandmarker, ImageSegmenter } from '@mediapipe/tasks-vision';
-import { MESH_POINT_COUNT, fivePoints, similarity } from './face-points.js';
+import { MESH_POINT_COUNT, FACE_OVAL, fivePoints, similarity } from './face-points.js';
 
+const BACKGROUND = 0;
 const HAIR = 1;
 const CLOTHES = 4;
 const SEG_SIZE = 256;
+const HAIR_GRID = 256; // width of the grid your own hair is painted over on
 const PHOTO_MAX = 1024;
 const CAMERA_SEG_EVERY_MS = 100; // how often your clothes are found again
 const BOX_EASE = 0.35; // smoothing of the outfit's placement between finds
@@ -62,6 +67,86 @@ function maskBox(conf, size, level = 0.5) {
   return maxX < 0 ? null : { x0: minX, y0: minY, x1: maxX + 1, y1: maxY + 1 };
 }
 
+// Fills cells with known[i] = 0 from the known ones around them (push-pull over a pyramid).
+function fillHoles(col, known, w, h) {
+  if (w <= 1 || h <= 1) return;
+  const w2 = Math.ceil(w / 2);
+  const h2 = Math.ceil(h / 2);
+  const c2 = new Float32Array(w2 * h2 * 3);
+  const k2 = new Float32Array(w2 * h2);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const i = y * w + x;
+      if (!known[i]) continue;
+      const j = (y >> 1) * w2 + (x >> 1);
+      const wt = known[i];
+      k2[j] += wt;
+      for (let c = 0; c < 3; c += 1) c2[j * 3 + c] += col[i * 3 + c] * wt;
+    }
+  }
+  for (let j = 0; j < w2 * h2; j += 1) {
+    if (k2[j] > 0) for (let c = 0; c < 3; c += 1) c2[j * 3 + c] /= k2[j];
+    k2[j] = Math.min(1, k2[j]);
+  }
+  let anyMissing = false;
+  for (let j = 0; j < k2.length; j += 1) if (k2[j] < 1) anyMissing = true;
+  if (anyMissing) fillHoles(c2, k2, w2, h2);
+  // Pull back up with bilinear sampling of the coarser level (smooth, no blocks).
+  for (let y = 0; y < h; y += 1) {
+    const fy = Math.min(h2 - 1, Math.max(0, (y + 0.5) / 2 - 0.5));
+    const y0 = Math.floor(fy);
+    const y1 = Math.min(h2 - 1, y0 + 1);
+    const ty = fy - y0;
+    for (let x = 0; x < w; x += 1) {
+      const i = y * w + x;
+      const kn = Math.min(1, known[i]);
+      if (kn >= 1) continue;
+      const fx = Math.min(w2 - 1, Math.max(0, (x + 0.5) / 2 - 0.5));
+      const x0 = Math.floor(fx);
+      const x1 = Math.min(w2 - 1, x0 + 1);
+      const tx = fx - x0;
+      for (let c = 0; c < 3; c += 1) {
+        const v =
+          (c2[(y0 * w2 + x0) * 3 + c] * (1 - tx) + c2[(y0 * w2 + x1) * 3 + c] * tx) * (1 - ty) +
+          (c2[(y1 * w2 + x0) * 3 + c] * (1 - tx) + c2[(y1 * w2 + x1) * 3 + c] * tx) * ty;
+        col[i * 3 + c] = col[i * 3 + c] * kn + v * (1 - kn);
+      }
+    }
+  }
+}
+
+// Height of the eyes (mesh points 33 and 263), in picture pixels.
+function eyeLine(points) {
+  return points ? (points[33 * 2 + 1] + points[263 * 2 + 1]) / 2 : null;
+}
+
+// Grows a 0/1 mask by r cells.
+function dilate(mask, w, h, r) {
+  const tmp = new Uint8Array(w * h);
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let on = 0;
+      for (let d = -r; d <= r && !on; d += 1) {
+        const xx = x + d;
+        if (xx >= 0 && xx < w && mask[y * w + xx]) on = 1;
+      }
+      tmp[y * w + x] = on;
+    }
+  }
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let on = 0;
+      for (let d = -r; d <= r && !on; d += 1) {
+        const yy = y + d;
+        if (yy >= 0 && yy < h && tmp[yy * w + x]) on = 1;
+      }
+      out[y * w + x] = on;
+    }
+  }
+  return out;
+}
+
 export class LookLayers {
   constructor(api) {
     this.api = api;
@@ -75,6 +160,13 @@ export class LookLayers {
     this.lastSegAt = -Infinity;
     this.layer = document.createElement('canvas');
     this.layerCtx = this.layer.getContext('2d');
+    this.small = document.createElement('canvas'); // the camera picture at mask size
+    this.smallCtx = this.small.getContext('2d', { willReadFrequently: true });
+    this.hairFill = document.createElement('canvas'); // background painted where your hair is
+    this.hairFillCtx = this.hairFill.getContext('2d');
+    this.hairFillOn = false;
+    this.plate = null; // remembered background colours (r, g, b per mask cell)
+    this.seen = null;
     this.error = '';
   }
 
@@ -230,8 +322,9 @@ export class LookLayers {
     return Boolean(this.photo && this.photo.clothes);
   }
 
-  // Finds your clothes in the camera picture (a few times a second).
-  findCameraClothes(frame, width, height, t, chinY = null) {
+  // Finds your clothes (and your hair, when it should be hidden) in the camera picture, a few times a
+  // second.
+  findCameraClothes(frame, width, height, t, chinY = null, { clothes = true, hair = false, eyeY = null } = {}) {
     // Every CAMERA_SEG_EVERY_MS, or less often when finding takes long (no graphics chip), so it
     // never takes more than about a fifth of the time.
     if (!this.videoSeg || t - this.lastSegAt < Math.max(CAMERA_SEG_EVERY_MS, (this.segMs || 0) * 5)) return;
@@ -250,6 +343,11 @@ export class LookLayers {
     this.segMs = performance.now() - segStart;
     const mw = masks[CLOTHES].width;
     const mh = masks[CLOTHES].height;
+    if (hair) this.updateHairFill(frame, masks, mw, mh, eyeY === null ? 1 : eyeY / height);
+    if (!clothes) {
+      masks.forEach((m) => m.close && m.close());
+      return;
+    }
     const clothesConf = masks[CLOTHES].getAsFloat32Array();
     const otherConf = masks.length > CLOTHES + 1 ? masks[CLOTHES + 1].getAsFloat32Array() : null;
     // Clothes, plus 'other' (patterned or plain fabric the model isn't sure of) below your chin.
@@ -296,14 +394,117 @@ export class LookLayers {
     else for (const k of ['x0', 'y0', 'x1', 'y1']) this.camBox[k] += (found[k] - this.camBox[k]) * BOX_EASE;
   }
 
-  drawOutfit(ctx, frame, width, height, t, points = null) {
+  // Paints the background over your hair: remembered background where it was seen, else the nearby
+  // background colours spread inwards. Runs with each camera segmentation.
+  // eyeLine: 0..1 down the picture; your face's skin helps fill only above it (the hairline).
+  updateHairFill(frame, masks, maskW, maskH, eyeLine = 1) {
+    // Work on a small grid (the masks can be full camera size).
+    const mw = Math.min(maskW, HAIR_GRID);
+    const mh = Math.max(1, Math.round((maskH * mw) / maskW));
+    if (this.small.width !== mw || this.small.height !== mh) {
+      this.small.width = mw;
+      this.small.height = mh;
+      this.hairFill.width = mw;
+      this.hairFill.height = mh;
+      this.plate = new Float32Array(mw * mh * 3);
+      this.seen = new Uint8Array(mw * mh);
+    }
+    this.smallCtx.drawImage(frame, 0, 0, mw, mh);
+    const px = this.smallCtx.getImageData(0, 0, mw, mh).data;
+    const sample = (m) => {
+      const full = m.getAsFloat32Array();
+      const out = new Float32Array(mw * mh);
+      for (let y = 0; y < mh; y += 1) {
+        const row = Math.min(maskH - 1, Math.floor(((y + 0.5) * maskH) / mh)) * maskW;
+        for (let x = 0; x < mw; x += 1) out[y * mw + x] = full[row + Math.min(maskW - 1, Math.floor(((x + 0.5) * maskW) / mw))];
+      }
+      return out;
+    };
+    const bg = sample(masks[BACKGROUND]);
+    const hairConf = sample(masks[HAIR]);
+    const body = sample(masks[HAIR + 1]); // body skin
+    const faceSkin = sample(masks[HAIR + 2]);
+    const clothesConf = sample(masks[CLOTHES]);
+    const n = mw * mh;
+    const skinRows = Math.round(eyeLine * mh) * mw;
+    // Remember the background wherever it's clearly visible.
+    const known = new Float32Array(n);
+    const col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i += 1) {
+      if (bg[i] > 0.85) {
+        const k = this.seen[i] ? 0.25 : 1;
+        for (let c = 0; c < 3; c += 1) this.plate[i * 3 + c] += (px[i * 4 + c] - this.plate[i * 3 + c]) * k;
+        this.seen[i] = 1;
+      }
+      if (this.seen[i]) {
+        known[i] = 1;
+        for (let c = 0; c < 3; c += 1) col[i * 3 + c] = this.plate[i * 3 + c];
+      } else if (hairConf[i] < 0.2 && (body[i] > 0.6 || clothesConf[i] > 0.6 || (faceSkin[i] > 0.6 && i < skinRows))) {
+        // Your skin and clothes as they are now (hair over your shoulders becomes shoulders, and the
+        // edge of your forehead becomes forehead).
+        known[i] = 1;
+        for (let c = 0; c < 3; c += 1) col[i * 3 + c] = px[i * 4 + c];
+      }
+    }
+    fillHoles(col, known, mw, mh);
+    // Where to paint: your hair, grown by a few cells so no strands are left at its edge.
+    const hairMask = new Uint8Array(n);
+    let any = 0;
+    for (let i = 0; i < n; i += 1) if (hairConf[i] > 0.3) {
+      hairMask[i] = 1;
+      any += 1;
+    }
+    const grown = dilate(hairMask, mw, mh, Math.max(1, Math.round(mw / 100)));
+    const img = this.hairFillCtx.createImageData(mw, mh);
+    for (let i = 0; i < n; i += 1) {
+      img.data[i * 4] = col[i * 3];
+      img.data[i * 4 + 1] = col[i * 3 + 1];
+      img.data[i * 4 + 2] = col[i * 3 + 2];
+      img.data[i * 4 + 3] = grown[i] ? 255 : 0;
+    }
+    this.hairFillCtx.putImageData(img, 0, 0);
+    this.hairFillOn = any > n * 0.002;
+    this.hairCells = any;
+  }
+
+  // Hides your own hair (call before the photo's hair is drawn). Your face is never painted over.
+  // segmented: drawOutfit already ran the camera segmentation this frame (with hideHair).
+  hideOwnHair(ctx, frame, width, height, t, points, { segmented = false } = {}) {
+    if (!this.videoSeg) return;
+    if (!segmented) this.findCameraClothes(frame, width, height, t, null, { clothes: false, hair: true, eyeY: eyeLine(points) });
+    if (!this.hairFillOn) return;
+    if (this.layer.width !== width || this.layer.height !== height) {
+      this.layer.width = width;
+      this.layer.height = height;
+    }
+    const l = this.layerCtx;
+    l.setTransform(1, 0, 0, 1, 0, 0);
+    l.globalCompositeOperation = 'source-over';
+    l.clearRect(0, 0, width, height);
+    l.filter = `blur(${Math.max(2, Math.round(width / 320))}px)`;
+    l.imageSmoothingQuality = 'high';
+    l.drawImage(this.hairFill, 0, 0, width, height);
+    l.filter = 'none';
+    if (points) {
+      // Keep the face (from the hairline down) as it is.
+      l.globalCompositeOperation = 'destination-out';
+      l.beginPath();
+      FACE_OVAL.forEach((idx, k) => (k ? l.lineTo(points[idx * 2], points[idx * 2 + 1]) : l.moveTo(points[idx * 2], points[idx * 2 + 1])));
+      l.closePath();
+      l.fill();
+      l.globalCompositeOperation = 'source-over';
+    }
+    ctx.drawImage(this.layer, 0, 0);
+  }
+
+  drawOutfit(ctx, frame, width, height, t, points = null, { hideHair = false } = {}) {
     if (!this.hasOutfit) return;
     let chinY = null;
     if (points) {
       chinY = 0;
       for (let i = 1; i < points.length; i += 2) chinY = Math.max(chinY, points[i]);
     }
-    this.findCameraClothes(frame, width, height, t, chinY);
+    this.findCameraClothes(frame, width, height, t, chinY, { clothes: true, hair: hideHair, eyeY: points ? eyeLine(points) : null });
     const cam = this.camBox;
     const pb = this.photo.clothesBox;
     if (!cam) return;

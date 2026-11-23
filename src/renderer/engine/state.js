@@ -40,7 +40,7 @@ export function makeScene(overrides = {}) {
     mirror: false,
     fit: 'fill',
     source: { type: 'webcam', deviceId: '', filePath: '', text: 'Be right back', color: '#1B1E27' },
-    ai: { enabled: false, engine: 'cloud', mode: 'restyle', prompt: '', enhance: true, referencePath: '', lookHair: false, lookOutfit: false },
+    ai: { enabled: false, engine: 'cloud', mode: 'restyle', prompt: '', enhance: true, referencePath: '', lookHair: false, lookOutfit: false, hideOwnHair: true },
     nameTag: { enabled: false, name: '', title: '' },
   };
   return normalizeScene({
@@ -130,6 +130,7 @@ export function normalizeScene(raw) {
       referencePath: str(ai.referencePath),
       lookHair: Boolean(ai.lookHair),
       lookOutfit: Boolean(ai.lookOutfit),
+      hideOwnHair: ai.hideOwnHair !== false,
     },
     nameTag: {
       enabled: Boolean(tag.enabled),
