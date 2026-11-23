@@ -2042,7 +2042,8 @@ async function runSmokeTest() {
       });
       state.scenes.push(scene);
       selectScene(scene.id);
-      const until = Date.now() + 90000;
+      // CI machines have no graphics chip: one swap on their processor takes 8-25 s, after loading.
+      const until = Date.now() + 180000;
       while (Date.now() < until && local.lastResultAt === 0) await wait(500);
       await wait(500);
       // How much the face area changed between what went in and what came out.
