@@ -26,7 +26,8 @@ function smoothstep(lo, hi, v) {
 }
 
 // A canvas of `src` whose alpha is the segmentation confidence for `cls` (mask covers `box` of src).
-function cutOut(src, conf, size, box, lo, hi) {
+// extra(i): optional alpha (0..1) to add per mask cell, already smooth (not thresholded).
+function cutOut(src, conf, size, box, lo, hi, extra = null) {
   const mask = document.createElement('canvas');
   mask.width = size;
   mask.height = size;
@@ -34,7 +35,7 @@ function cutOut(src, conf, size, box, lo, hi) {
   const img = mctx.createImageData(size, size);
   let any = 0;
   for (let i = 0; i < conf.length; i += 1) {
-    const a = smoothstep(lo, hi, conf[i]);
+    const a = extra ? Math.max(smoothstep(lo, hi, conf[i]), extra(i)) : smoothstep(lo, hi, conf[i]);
     img.data[i * 4 + 3] = Math.round(a * 255);
     any += a;
   }
@@ -347,7 +348,18 @@ export class LookLayers {
     const hairSeg = this.segmentSquare(src, hairBox);
     const bodySeg = this.segmentSquare(src, bodyBox);
     if (!hairSeg || !bodySeg) return false;
-    const hair = cutOut(src, hairSeg.masks[HAIR], hairSeg.size, hairBox, 0.35, 0.75);
+    // Hair, plus the photo's upper forehead (full above your hairline, fading out by the eyebrows): the
+    // photo's hairline is often higher than yours, and without it your own forehead showed as a band
+    // between the face and the hair.
+    const hs = hairSeg.size;
+    const rowOf = (py) => ((py - hairBox.y) / hairSide) * hs;
+    const midRow = rowOf(pts[10 * 2 + 1]); // top of the face mesh (about your hairline)
+    const browRow = rowOf(pts[9 * 2 + 1]);
+    const skin = hairSeg.masks[HAIR + 2];
+    const forehead = skin
+      ? (i) => smoothstep(0.35, 0.75, skin[i]) * (1 - smoothstep(midRow, browRow, Math.floor(i / hs)))
+      : null;
+    const hair = cutOut(src, hairSeg.masks[HAIR], hs, hairBox, 0.35, 0.75, forehead);
     // Clothes, plus 'other' (patterned fabric, accessories) below the chin.
     const size = bodySeg.size;
     const chinRow = Math.max(0, Math.round(((maxY - bodyBox.y) / bodySide) * size));
