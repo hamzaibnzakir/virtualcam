@@ -824,6 +824,7 @@ function handlePromptAction(id) {
 // ---------- voice & calls ----------
 
 const voice = new VoiceStudio({ api, onState: () => renderVoice() });
+voice.testTone = Boolean(api.smoke);
 let callVideoTrack = null;
 const calls = new CallLink({
   api,

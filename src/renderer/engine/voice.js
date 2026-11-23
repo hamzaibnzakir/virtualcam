@@ -59,15 +59,21 @@ export class VoiceStudio {
   async start() {
     if (this.running) return this.track;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: this.micId ? { exact: this.micId } : undefined,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-        },
-      });
+      this.stream = await navigator.mediaDevices
+        .getUserMedia({
+          audio: {
+            deviceId: this.micId ? { exact: this.micId } : undefined,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        })
+        .catch((err) => {
+          // Self-test machines have no microphone: a humming stand-in instead.
+          if (this.testTone && err && err.name === 'NotFoundError') return this.toneStream();
+          throw err;
+        });
       this.ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
       await this.ctx.audioWorklet.addModule('voice-worklet.js');
       const src = this.ctx.createMediaStreamSource(this.stream);
@@ -120,6 +126,28 @@ export class VoiceStudio {
     if (this.aiState !== 'error') this.aiState = 'off';
     if (this.ai && this.ai.control) this.ai.reset();
     this.onState();
+  }
+
+  // A speech-like hum (pitch and loudness move like a voice), for self-tests without a microphone.
+  toneStream() {
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 140;
+    const wobble = ctx.createOscillator();
+    wobble.frequency.value = 3;
+    const wobbleGain = ctx.createGain();
+    wobbleGain.gain.value = 20;
+    wobble.connect(wobbleGain).connect(osc.frequency);
+    const level = ctx.createGain();
+    level.gain.value = 0.15;
+    const dest = ctx.createMediaStreamDestination();
+    osc.connect(level).connect(dest);
+    osc.start();
+    wobble.start();
+    const stream = dest.stream;
+    stream.getTracks()[0].addEventListener('ended', () => ctx.close());
+    return stream;
   }
 
   // ---------- AI voices ----------
