@@ -44,7 +44,9 @@ export class LocalFaceAI {
     this.input = document.createElement('canvas');
     this.input.width = output.width;
     this.input.height = output.height;
-    this.inputCtx = this.input.getContext('2d', { willReadFrequently: true, alpha: false });
+    // Kept on the graphics chip: the face tracker and the face warp read it there (a processor-side
+    // canvas cost a copy out of the chip and back every frame). Only the small face crop is read back.
+    this.inputCtx = this.input.getContext('2d', { alpha: false });
     this.canvas = document.createElement('canvas');
     this.canvas.width = output.width;
     this.canvas.height = output.height;

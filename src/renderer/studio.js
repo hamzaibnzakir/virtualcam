@@ -1521,7 +1521,7 @@ function bindEvents() {
       app: info && info.version,
       hardware: hardware && { verdict: hardware.verdict, gpus: hardware.gpus, ramGB: hardware.ramGB },
       engine: activeEngine,
-      look: { hair: lookWanted.hair, outfit: lookWanted.outfit, hideHair: Boolean(lookWanted.hideHair), segMs: look.segMs ? Math.round(look.segMs) : null },
+      look: { hair: lookWanted.hair, outfit: lookWanted.outfit, hideHair: Boolean(lookWanted.hideHair), segMs: look.segMs ? Math.round(look.segMs) : null, segDevice: look.segDelegate || null, segAvg: look.segAvg || null },
       output: { fps: compositor.fps, size: `${$('program').width}x${$('program').height}` },
       lite: { fps: lite.stats.fps, ms: lite.stats.ms, tracking: lite.delegate },
       local: {

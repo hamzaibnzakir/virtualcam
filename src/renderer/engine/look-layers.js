@@ -246,14 +246,55 @@ export class LookLayers {
         outputCategoryMask: false,
       });
     await this.segModel();
-    // On the processor: it runs a few times a second on a small picture, and its masks are then
-    // already in memory. On the graphics chip, reading them back made the whole frame wait for the
-    // face tracker's work to finish.
+    // Starts on the processor: it runs a few times a second on a small picture, and its masks are
+    // then already in memory. If the processor turns out slow at it, it moves to the graphics chip
+    // (see pickSegDevice).
+    this.makeSeg = make;
+    this.segRunTimes = [];
     try {
       this.videoSeg = await make('CPU');
+      this.segDelegate = 'CPU';
     } catch {
       this.videoSeg = await make('GPU');
+      this.segDelegate = 'GPU';
     }
+  }
+
+  // After a few runs (the first one warms up), keep whichever device finds you faster.
+  async pickSegDevice(ms) {
+    if (this.segSwitching || this.segDecided) return;
+    this.segRunTimes.push(ms);
+    if (this.segRunTimes.length < 4) return;
+    const avg = this.segRunTimes.slice(1).reduce((a, b) => a + b, 0) / (this.segRunTimes.length - 1);
+    this.segAvg = { ...(this.segAvg || {}), [this.segDelegate]: Math.round(avg) };
+    const other = this.segDelegate === 'CPU' ? 'GPU' : 'CPU';
+    if (this.segDelegate === 'CPU' && avg > 40 && !this.segAvg.GPU) {
+      this.segSwitching = true;
+      try {
+        const seg = await this.makeSeg(other);
+        if (this.videoSeg) this.videoSeg.close();
+        this.videoSeg = seg;
+        this.segDelegate = other;
+        this.segRunTimes = [];
+      } catch {
+        this.segDecided = true;
+      } finally {
+        this.segSwitching = false;
+      }
+      return;
+    }
+    if (this.segAvg.CPU && this.segAvg.GPU && this.segDelegate === 'GPU' && this.segAvg.GPU > this.segAvg.CPU) {
+      // The processor was faster after all: go back.
+      try {
+        const seg = await this.makeSeg('CPU');
+        this.videoSeg.close();
+        this.videoSeg = seg;
+        this.segDelegate = 'CPU';
+      } catch {
+        // stay
+      }
+    }
+    this.segDecided = true;
   }
 
   // Reads the photo once: its face position, hair and clothes. Returns false when it has no face.
@@ -370,6 +411,7 @@ export class LookLayers {
     } finally {
       // All of it (finding, reading the result back, the maths), so the pacing above is honest.
       this.segMs = performance.now() - segStart;
+      this.pickSegDevice(this.segMs);
     }
   }
 

@@ -37,6 +37,9 @@ const MAX_FILE_BYTES = 512 * 1024 * 1024;
 // addresses behind .local names that need a working mDNS service to resolve, which isn't always the
 // case (blocked by firewalls or VPNs), so the link would never connect. Show plain local addresses.
 app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
+// Laptops with two graphics chips (like Intel + NVIDIA): draw and track faces on the fast one. Windows
+// otherwise gives apps the power-saving chip.
+app.commandLine.appendSwitch('force_high_performance_gpu');
 
 if (SMOKE) {
   // Headless test run: fake camera (unless testing real devices), auto-accept prompts, throwaway profile.
