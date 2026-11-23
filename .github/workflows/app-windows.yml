@@ -1,6 +1,6 @@
 name: App on Windows
 
-# Runs the whole app on a real Windows machine: installs the VirtualCam camera through the app,
+# Runs the whole app on a real Windows machine: installs the Brainbox VirtualCam camera through the app,
 # reads it back like a video app would, downloads the AI models with the app's downloader and
 # runs a real local face swap. Then builds the Windows installer (download it from this run's page).
 on:
@@ -72,7 +72,7 @@ jobs:
         if: steps.dist.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: VirtualCam-Windows-installer
+          name: Brainbox-VirtualCam-Windows-installer
           path: release/*.exe
           retention-days: 30
 

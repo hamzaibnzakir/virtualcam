@@ -489,6 +489,16 @@ function renderLocal() {
   btn.disabled = Boolean(busyBoost);
 
   setPressed($('toggle-boost'), state.settings.faceBoost);
+  const busyFast = download && download.pack === 'fast';
+  $('local-model').value = state.settings.localModel;
+  $('local-model').disabled = Boolean(busyFast);
+  $('fast-line').hidden = !busyFast && !(state.settings.localModel === 'fast' && !models.fast);
+  if (busyFast) {
+    const pct = download.total ? Math.floor((download.done / download.total) * 100) : 0;
+    $('fast-line').textContent = `Downloading the fast model… ${pct}%`;
+  } else {
+    $('fast-line').textContent = 'The fast model is not downloaded yet.';
+  }
   $('boost-row').hidden = models.boost && !busyBoost;
   $('boost-line').textContent = busyBoost ? 'Downloading the detail model…' : `Needs a one-time download (${formatMB(models.boostBytes)})`;
   $('btn-boost-download').textContent = busyBoost ? 'Cancel' : 'Download';
@@ -514,6 +524,7 @@ async function refreshModels() {
   } catch {
     // keep the last known status
   }
+  local.swapFile = state && state.settings.localModel === 'fast' && models.fast ? models.fastFile : null;
   renderLocal();
 }
 
@@ -526,7 +537,7 @@ async function startDownload(pack) {
   renderLocal();
   try {
     models = await api.modelsDownload(pack);
-    showToast(pack === 'core' ? 'Local AI models downloaded' : 'Face detail boost downloaded');
+    showToast({ core: 'Local AI models downloaded', boost: 'Face detail boost downloaded', fast: 'Fast model downloaded' }[pack]);
   } catch (err) {
     showToast((err && err.message) || 'Download failed', true);
   } finally {
@@ -606,7 +617,7 @@ function openOutput() {
   }
   outputWindow = win;
   const doc = win.document;
-  doc.title = 'VirtualCam Output';
+  doc.title = 'Brainbox VirtualCam Output';
   const style = doc.createElement('style');
   style.textContent = 'html,body{margin:0;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain;display:block}';
   doc.head.append(style);
@@ -654,16 +665,16 @@ function renderCamera() {
   const btn = $('btn-camera');
   btn.hidden = !cameraState.supported;
   btn.classList.toggle('on', cameraState.installed && cameraState.running);
-  if (!cameraState.installed) btn.textContent = 'Install VirtualCam camera';
+  if (!cameraState.installed) btn.textContent = cameraState.needsUpdate ? 'Update the camera' : 'Install the camera';
   else if (!state || !state.settings.cameraOutput) btn.textContent = 'Camera paused';
-  else if (cameraState.inUse) btn.textContent = 'VirtualCam: in use';
-  else if (cameraState.running) btn.textContent = 'VirtualCam: ready';
-  else btn.textContent = 'VirtualCam: starting…';
+  else if (cameraState.inUse) btn.textContent = 'Camera: in use';
+  else if (cameraState.running) btn.textContent = 'Camera: ready';
+  else btn.textContent = 'Camera: starting…';
 
   const detail = $('camera-detail');
   if (!cameraState.supported) detail.textContent = 'The camera device is Windows only for now. Use the output window with OBS.';
   else if (cameraState.message) detail.textContent = cameraState.message;
-  else if (cameraState.installed) detail.textContent = 'Installed. Pick "VirtualCam" as the camera in Zoom, Meet, Teams, Discord or OBS.';
+  else if (cameraState.installed) detail.textContent = 'Installed. Pick "Brainbox VirtualCam" as the camera in Zoom, Meet, Teams, Discord or OBS.';
   else detail.textContent = 'Not installed. Installing needs admin approval once.';
   $('btn-camera-install').hidden = !cameraState.supported || cameraState.installed;
   $('btn-camera-remove').hidden = !cameraState.supported || !cameraState.installed;
@@ -681,7 +692,7 @@ async function installCamera() {
   cameraState = await api.cameraInstall();
   renderCamera();
   if (cameraState.installed) {
-    showToast('VirtualCam camera installed. Pick it in your video app.');
+    showToast('Brainbox VirtualCam camera installed. Pick it in your video app.');
     await syncCamera();
   }
 }
@@ -695,6 +706,8 @@ async function openSettings() {
   $('key-status').textContent = key ? 'A key is saved on this computer.' : 'No key saved yet.';
   $('set-price').value = state.settings.pricePerSecond > 0 ? String(state.settings.pricePerSecond) : '';
   renderCamera();
+  renderPrefs();
+  renderUpdates();
   $('settings').showModal();
 }
 
@@ -709,6 +722,116 @@ async function saveSettings() {
   $('settings').close();
   // A new key may unblock AI for the current scene.
   changed();
+}
+
+// ---------- always ready: tray, start with Windows, asking when a camera turns on ----------
+
+function prefsOf(settings) {
+  return {
+    runInBackground: settings.runInBackground,
+    startWithWindows: settings.startWithWindows,
+    askOnCameraUse: settings.askOnCameraUse,
+  };
+}
+
+function renderPrefs() {
+  setPressed($('toggle-ask'), state.settings.askOnCameraUse);
+  setPressed($('toggle-bg'), state.settings.runInBackground);
+  setPressed($('toggle-login'), state.settings.startWithWindows);
+}
+
+function setPref(name, value) {
+  state.settings[name] = value;
+  renderPrefs();
+  api.applyPrefs(prefsOf(state.settings));
+  changed();
+}
+
+const lastAsked = new Map(); // app -> time, so the same app isn't asked about twice in a row
+
+function askAboutCamera(event) {
+  if (!state.settings.askOnCameraUse || !event) return;
+  const who = event.kind === 'ours' ? 'ours' : String(event.app || 'An app');
+  const now = Date.now();
+  if (now - (lastAsked.get(who) || 0) < 10 * 60 * 1000) return;
+  lastAsked.set(who, now);
+  const scene = activeScene();
+  const lookOn = scene.ai.enabled;
+  const hasPhoto = Boolean(scene.ai.referencePath);
+  if (event.kind === 'ours') {
+    const actions = lookOn
+      ? [
+          { id: 'keep', label: 'Keep it on', primary: true },
+          { id: 'look-off', label: 'Turn my look off' },
+          { id: 'open', label: 'Open studio' },
+        ]
+      : hasPhoto || scene.ai.engine === 'cloud'
+        ? [
+            { id: 'look-on', label: 'Turn my look on', primary: true },
+            { id: 'keep', label: 'Keep it plain' },
+            { id: 'open', label: 'Open studio' },
+          ]
+        : [
+            { id: 'open', label: 'Open studio', primary: true },
+            { id: 'keep', label: 'Keep it plain' },
+          ];
+    api.showPrompt({
+      title: 'A video app just turned on Brainbox VirtualCam',
+      body: `Showing "${scene.name}". Your look is ${lookOn ? 'ON' : 'OFF'}. Do you want to use it now?`,
+      actions,
+      timeoutMs: 60000,
+    });
+    return;
+  }
+  const installed = cameraState.installed;
+  api.showPrompt({
+    title: `${who} turned on your real camera`,
+    body: installed
+      ? `Want Brainbox VirtualCam instead? In ${who}, pick "Brainbox VirtualCam" as the camera. Now showing "${scene.name}" (look ${lookOn ? 'on' : 'off'}).`
+      : `Want Brainbox VirtualCam instead? Install its camera first (one click in the studio), then pick it in ${who}.`,
+    actions: [
+      { id: 'open', label: 'Open studio', primary: true },
+      { id: 'dismiss', label: 'Not now' },
+    ],
+    timeoutMs: 45000,
+  });
+}
+
+function handlePromptAction(id) {
+  const scene = activeScene();
+  if (id === 'look-on') {
+    scene.ai.enabled = true;
+    changed();
+    showToast(`Look on for "${scene.name}"`);
+  } else if (id === 'look-off') {
+    scene.ai.enabled = false;
+    changed();
+    showToast(`Look off for "${scene.name}"`);
+  }
+}
+
+// ---------- updates ----------
+
+let updateState = { status: 'idle', version: '' };
+
+function renderUpdates() {
+  const u = updateState;
+  const text = {
+    dev: `Version ${u.version} (test build: updates are off)`,
+    idle: `Version ${u.version}`,
+    checking: `Version ${u.version} · checking for updates…`,
+    latest: `Version ${u.version} · you have the latest`,
+    downloading: `Downloading version ${u.available}${u.progress ? ` (${u.progress}%)` : ''}…`,
+    ready: `Version ${u.available} is ready. Restart to update.`,
+    error: `Version ${u.version} · couldn't check for updates${u.error ? ` (${u.error})` : ''}`,
+  }[u.status] || `Version ${u.version}`;
+  $('update-detail').textContent = text;
+  const ready = u.status === 'ready';
+  $('btn-update-check').textContent = ready ? 'Restart to update' : 'Check for updates';
+  $('btn-update-check').disabled = u.status === 'checking' || u.status === 'downloading' || u.status === 'dev';
+  const banner = $('btn-update-ready');
+  banner.hidden = !ready;
+  if (ready) banner.textContent = `Update to ${u.available}`;
 }
 
 // ---------- wiring ----------
@@ -783,7 +906,7 @@ function bindEvents() {
     scheduleSave();
     await syncCamera();
     if (cameraState.installed && state.settings.cameraOutput) {
-      showToast('Picture shape changed. In an open call, pick VirtualCam again; in Chrome or Meet, reload the page.');
+      showToast('Picture shape changed. In an open call, pick Brainbox VirtualCam again; in Chrome or Meet, reload the page.');
     }
   });
 
@@ -867,6 +990,48 @@ function bindEvents() {
   });
   $('btn-models').addEventListener('click', () => startDownload('core'));
   $('btn-engine-log').addEventListener('click', () => api.showEngineLog());
+  // Inspector tabs: Look (AI) and Picture (source, name tag).
+  const showTab = (name) => {
+    document.querySelectorAll('.tabs [role="tab"]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
+    document.querySelectorAll('.inspector [data-tab]:not([role="tab"])').forEach((el) => {
+      el.hidden = el.dataset.tab !== name;
+    });
+  };
+  document.querySelectorAll('.tabs [role="tab"]').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
+  showTab('look');
+  $('local-model').addEventListener('change', async (e) => {
+    const want = e.target.value === 'fast' ? 'fast' : 'best';
+    if (want === 'fast' && !models.fast) {
+      await startDownload('fast');
+      if (!models.fast) {
+        e.target.value = 'best';
+        return;
+      }
+    }
+    state.settings.localModel = want;
+    local.swapFile = want === 'fast' ? models.fastFile : null;
+    changed();
+    local.reload();
+    showToast(want === 'fast' ? 'Switched to the fast model' : 'Switched to the best-quality model');
+  });
+  $('toggle-ask').addEventListener('click', () => setPref('askOnCameraUse', !state.settings.askOnCameraUse));
+  $('toggle-bg').addEventListener('click', () => setPref('runInBackground', !state.settings.runInBackground));
+  $('toggle-login').addEventListener('click', () => setPref('startWithWindows', !state.settings.startWithWindows));
+  api.onPrefsSet((next) => {
+    for (const [k, v] of Object.entries(next || {})) if (k in prefsOf(state.settings)) state.settings[k] = Boolean(v);
+    renderPrefs();
+    api.applyPrefs(prefsOf(state.settings));
+    changed();
+  });
+  api.onCameraUse(askAboutCamera);
+  api.onPromptAction(handlePromptAction);
+  api.onUpdates((next) => {
+    updateState = { ...updateState, ...next };
+    renderUpdates();
+  });
+  const runUpdateButton = () => (updateState.status === 'ready' ? api.installUpdate() : api.checkUpdates());
+  $('btn-update-check').addEventListener('click', runUpdateButton);
+  $('btn-update-ready').addEventListener('click', () => api.installUpdate());
   $('toggle-look-hair').addEventListener('click', () => {
     activeScene().ai.lookHair = !activeScene().ai.lookHair;
     changed();
@@ -899,7 +1064,7 @@ function bindEvents() {
   });
   $('btn-camera-install').addEventListener('click', installCamera);
   $('btn-camera-remove').addEventListener('click', async () => {
-    if (!window.confirm('Remove the VirtualCam camera from Windows? Video apps will no longer see it.')) return;
+    if (!window.confirm('Remove the Brainbox VirtualCam camera from Windows? Video apps will no longer see it.')) return;
     cameraState = await api.cameraUninstall();
     renderCamera();
   });
@@ -983,7 +1148,7 @@ async function fillCameras() {
   select.append(def);
   cams
     // Never offer our own output as an input: that would loop the picture into itself.
-    .filter((cam) => !/^virtualcam/i.test(cam.label))
+    .filter((cam) => !/virtualcam/i.test(cam.label))
     .forEach((cam) => {
       const opt = document.createElement('option');
       opt.value = cam.id;
@@ -1021,6 +1186,12 @@ async function start() {
   labelHotkeys();
   bindEvents();
   compositor.start();
+  api.applyPrefs(prefsOf(state.settings));
+  api.appInfo().then((info) => {
+    updateState = { ...updateState, version: info.version };
+    $('app-version').textContent = `v${info.version}`;
+    renderUpdates();
+  });
 
   setInterval(() => {
     if (activeEngine === 'cloud' && cloudState === 'generating' && !override) aiSeconds += 1;
@@ -1157,7 +1328,7 @@ async function runSmokeTest() {
         step.ok = Math.abs(px[0] - 32) < 14 && Math.abs(px[1] - 200) < 14 && Math.abs(px[2] - 100) < 14;
       }
       report.steps.push(step);
-      if (!step.ok) failures.push('the VirtualCam camera did not show the studio picture');
+      if (!step.ok) failures.push('the Brainbox VirtualCam camera did not show the studio picture');
     }
 
     // Lite face warp on a still photo of a face.
@@ -1311,4 +1482,4 @@ window.addEventListener('unhandledrejection', (e) => {
   showToast(`Something went wrong: ${(reason && reason.message) || reason}`, true);
 });
 
-start().catch((err) => showToast(`VirtualCam could not start: ${err.message}`, true));
+start().catch((err) => showToast(`Brainbox VirtualCam could not start: ${err.message}`, true));

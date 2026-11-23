@@ -14,6 +14,7 @@ await build({
   entryPoints: {
     studio: join(root, 'src/renderer/studio.js'),
     switcher: join(root, 'src/renderer/switcher.js'),
+    prompt: join(root, 'src/renderer/prompt.js'),
   },
   bundle: true,
   format: 'iife',
@@ -26,7 +27,7 @@ await build({
   legalComments: 'none',
 });
 
-for (const file of ['studio.html', 'switcher.html', 'styles.css']) {
+for (const file of ['studio.html', 'switcher.html', 'prompt.html', 'styles.css']) {
   cpSync(join(root, 'src/renderer', file), join(out, file));
 }
 
@@ -39,5 +40,9 @@ for (const file of ['vision_wasm_internal.js', 'vision_wasm_internal.wasm']) {
 for (const file of ['face_landmarker.task', 'selfie_multiclass_256x256.tflite']) {
   cpSync(join(root, 'assets/mediapipe', file), join(out, 'mediapipe', file));
 }
+
+// Brand images (icon on the prompt card and in the studio).
+mkdirSync(join(out, 'brand'), { recursive: true });
+cpSync(join(root, 'assets/brand/icon.png'), join(out, 'brand', 'icon.png'));
 
 console.log('Built renderer into dist/');

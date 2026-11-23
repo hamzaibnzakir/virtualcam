@@ -124,10 +124,13 @@ class FaceSwapper {
     return Date.now() - t;
   }
 
-  async load({ preferred = 'auto', gpuCount = 0, detSize = 640, onStep = () => {}, log = () => {} } = {}) {
-    const file = (key) => path.join(this.modelsDir, MODEL_FILES[key]);
+  // swapFile: a different swap model file in the models folder (the fast one), else inswapper_128.
+  async load({ preferred = 'auto', gpuCount = 0, detSize = 640, swapFile = null, onStep = () => {}, log = () => {} } = {}) {
+    const names = { ...MODEL_FILES, ...(swapFile && /^[\w.-]+\.onnx$/.test(swapFile) ? { swapper: swapFile } : {}) };
+    const file = (key) => path.join(this.modelsDir, names[key]);
+    this.swapFile = names.swapper;
     for (const key of Object.keys(MODEL_FILES)) {
-      if (!fs.existsSync(file(key))) throw new Error(`Missing model file ${MODEL_FILES[key]}`);
+      if (!fs.existsSync(file(key))) throw new Error(`Missing model file ${names[key]}`);
     }
 
     // Try each device with the swap model (the heavy one) and keep the fastest.

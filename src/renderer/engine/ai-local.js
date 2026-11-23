@@ -27,6 +27,7 @@ export class LocalFaceAI {
     this.tried = [];
     this.step = ''; // what the engine is doing during a long start-up step
     this.gpuCount = 0; // graphics chips found by the hardware check (0 = unknown)
+    this.swapFile = null; // the fast swap model's file, when chosen (null = the standard model)
     this.target = null;
     this.dirty = false;
     this.running = false;
@@ -76,7 +77,7 @@ export class LocalFaceAI {
       this.inFlight = null;
       this.applied = { refKey: null, enhance: false };
       this.rejectWaiters(new Error('The face engine stopped'));
-      if (this.target) {
+      if (this.target && performance.now() - (this.reloadAt || -1e9) > 10000) {
         this.setState('error');
         this.onError('The local face engine stopped. Toggle AI to restart it.');
       }
@@ -98,6 +99,21 @@ export class LocalFaceAI {
   }
 
   // target: null (off) or { refKey, refBlob, enhance }
+  // Restarts the engine (to load a different swap model).
+  async reload() {
+    this.reloadAt = performance.now();
+    try {
+      await this.api.engineStop();
+    } catch {
+      // already stopped
+    }
+    this.engineReady = false;
+    this.inFlight = null;
+    this.applied = { refKey: null, enhance: false };
+    if (this.warp) this.warp.clear();
+    if (this.target) this.apply(this.target);
+  }
+
   setTarget(target) {
     this.target = target;
     this.dirty = true;
@@ -213,7 +229,7 @@ export class LocalFaceAI {
     const res = await this.api.engineStart();
     if (!res || !res.ok) throw new Error('The face engine could not start');
     await this.waitFor('hello', { idle: 30000 });
-    this.send({ type: 'load', modelsDir: res.modelsDir, gpuCount: this.gpuCount });
+    this.send({ type: 'load', modelsDir: res.modelsDir, gpuCount: this.gpuCount, swapFile: this.swapFile });
     // The first start can be slow: the AI runtime loads, then each graphics chip is tried.
     const loaded = await this.waitFor('loaded', { idle: 90000, cap: 600000 });
     this.provider = loaded.provider;

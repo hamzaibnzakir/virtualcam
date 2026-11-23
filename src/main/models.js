@@ -45,8 +45,50 @@ const MODELS = [
   },
 ];
 
-function packFiles(pack) {
-  return MODELS.filter((m) => m.pack === pack);
+// The fast swap model (a small copy of the swap model, trained for this app) is published with the
+// app's releases. Its details live in a small manifest next to it, so a newer model can be published
+// without a new app version.
+const FAST_MANIFEST_URL =
+  'https://github.com/hamzaibnzakir/brainbox-virtualcam-releases/releases/download/models-fast/fast-model.json';
+const FAST_LOCAL = 'fast-model.json';
+
+function validFast(m) {
+  return (
+    m &&
+    typeof m.file === 'string' &&
+    /^[\w.-]+\.onnx$/.test(m.file) &&
+    typeof m.url === 'string' &&
+    /^https:\/\/(github\.com|huggingface\.co|objects\.githubusercontent\.com)\//.test(m.url) &&
+    /^[0-9a-f]{64}$/.test(m.sha256) &&
+    Number.isInteger(m.bytes) &&
+    m.bytes > 1e6 &&
+    m.bytes < 2e8
+  );
+}
+
+function fastLocal(modelsDir) {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(modelsDir, FAST_LOCAL), 'utf8'));
+    return validFast(m) ? m : null;
+  } catch {
+    return null;
+  }
+}
+
+// Looks up the published fast model. Returns null when none is published yet (or offline).
+async function fetchFastManifest(fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(FAST_MANIFEST_URL, { redirect: 'follow' });
+    if (!res.ok) return null;
+    const m = await res.json();
+    return validFast(m) ? { id: 'swapperFast', label: 'Fast face swap', pack: 'fast', ...m } : null;
+  } catch {
+    return null;
+  }
+}
+
+function packFiles(pack, extra = []) {
+  return [...MODELS, ...extra].filter((m) => m.pack === pack);
 }
 
 function packBytes(pack) {
@@ -62,9 +104,12 @@ function status(modelsDir) {
       return false;
     }
   };
+  const fast = fastLocal(modelsDir);
   return {
     core: packFiles('core').every(present),
     boost: packFiles('boost').every(present),
+    fast: Boolean(fast && present(fast)),
+    fastFile: fast && present(fast) ? fast.file : null,
     coreBytes: packBytes('core'),
     boostBytes: packBytes('boost'),
   };
@@ -87,7 +132,13 @@ class Downloader {
   // Downloads every missing file of a pack. onProgress({ done, total, file }) fires as bytes arrive.
   async download(pack, onProgress, fetchImpl = fetch) {
     if (this.controller) throw new Error('A download is already running');
-    const files = packFiles(pack);
+    let extra = [];
+    if (pack === 'fast') {
+      const fast = await fetchFastManifest(fetchImpl);
+      if (!fast) throw new Error("The fast model isn't published yet. Keep using Best for now.");
+      extra = [fast];
+    }
+    const files = packFiles(pack, extra);
     if (!files.length) throw new Error(`Unknown model pack ${pack}`);
     fs.mkdirSync(this.modelsDir, { recursive: true });
 
@@ -109,6 +160,10 @@ class Downloader {
       }
     } finally {
       this.controller = null;
+    }
+    if (pack === 'fast') {
+      const { file, url, sha256, bytes, version } = extra[0];
+      fs.writeFileSync(path.join(this.modelsDir, FAST_LOCAL), JSON.stringify({ file, url, sha256, bytes, version }));
     }
     return status(this.modelsDir);
   }
@@ -145,4 +200,4 @@ class Downloader {
   }
 }
 
-module.exports = { MODELS, Downloader, status, packBytes };
+module.exports = { MODELS, Downloader, status, packBytes, fetchFastManifest, FAST_MANIFEST_URL };

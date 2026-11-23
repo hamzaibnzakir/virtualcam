@@ -10,8 +10,12 @@ const {
   safeStorage,
   screen,
   MessageChannelMain,
+  Menu,
+  nativeImage,
+  Notification,
   session,
   shell,
+  Tray,
   utilityProcess,
 } = require('electron');
 const fs = require('node:fs');
@@ -21,6 +25,8 @@ const path = require('node:path');
 const { checkHardware } = require('./hardware');
 const { Downloader, status: modelStatus } = require('./models');
 const { CameraDriver } = require('./camera-driver');
+const { CameraWatch } = require('./camera-watch');
+const { setupUpdater } = require('./updater');
 
 const SMOKE = process.env.VCAM_SMOKE === '1';
 const DIST = path.join(__dirname, '..', '..', 'dist');
@@ -37,11 +43,26 @@ if (SMOKE) {
   }
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
   app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'vcam-smoke-')));
+} else if (!process.env.VCAM_USER_DATA_NEW) {
+  // Versions before 1.1 were called VirtualCam: keep using that folder, so scenes, photos and the
+  // downloaded AI models carry over to Brainbox VirtualCam.
+  app.setPath('userData', path.join(app.getPath('appData'), 'VirtualCam'));
 }
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
+
+// Started by Windows at sign-in: run in the tray without opening the studio window.
+const START_HIDDEN = process.argv.includes('--background');
+const BRAND = path.join(__dirname, '..', '..', 'assets', 'brand');
+let tray = null;
+let promptWindow = null;
+let updater = null;
+let cameraWatch = null;
+// Preferences the studio sends (settings dialog); defaults until it does.
+let prefs = { runInBackground: true, startWithWindows: true, askOnCameraUse: true };
+let toldAboutTray = false;
 
 let mainWindow = null;
 let switcherWindow = null;
@@ -143,10 +164,11 @@ function createMainWindow() {
     height: 940,
     minWidth: 980,
     minHeight: 640,
-    title: 'VirtualCam',
+    title: 'Brainbox VirtualCam',
     backgroundColor: '#0B0C10',
     autoHideMenuBar: true,
-    show: !SMOKE || Boolean(process.env.VCAM_SMOKE_SHOT),
+    show: (!SMOKE && !START_HIDDEN) || Boolean(process.env.VCAM_SMOKE_SHOT),
+    icon: path.join(BRAND, 'icon.png'),
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,
@@ -169,7 +191,7 @@ function createMainWindow() {
           width: 1280,
           height: 720,
           useContentSize: true,
-          title: 'VirtualCam Output',
+          title: 'Brainbox VirtualCam Output',
           backgroundColor: '#000000',
           autoHideMenuBar: true,
           show: !SMOKE,
@@ -198,6 +220,21 @@ function createMainWindow() {
   }
 
   mainWindow.loadFile(path.join(DIST, 'studio.html'));
+
+  // Closing the window keeps the app (and the camera) running in the tray, unless you turned that off.
+  mainWindow.on('close', (event) => {
+    if (app.isQuitting || SMOKE || !prefs.runInBackground) return;
+    event.preventDefault();
+    mainWindow.hide();
+    if (!toldAboutTray && Notification.isSupported()) {
+      toldAboutTray = true;
+      new Notification({
+        title: 'Brainbox VirtualCam is still running',
+        body: 'The camera keeps working and will ask you when an app starts using it. Quit from the tray icon.',
+        icon: path.join(BRAND, 'icon.png'),
+      }).show();
+    }
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
     // Closing the studio quits everything, including the output window.
@@ -207,6 +244,98 @@ function createMainWindow() {
 
 function sendToStudio(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+function openStudio() {
+  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function quitApp() {
+  app.isQuitting = true;
+  app.quit();
+}
+
+function createTray() {
+  if (tray || SMOKE) return;
+  const image = nativeImage.createFromPath(path.join(BRAND, 'tray.png'));
+  tray = new Tray(image);
+  tray.setToolTip('Brainbox VirtualCam');
+  const menu = () =>
+    Menu.buildFromTemplate([
+      { label: 'Open the studio', click: openStudio },
+      { label: 'Scene switcher', click: () => showSwitcher() },
+      { type: 'separator' },
+      {
+        label: 'Ask when an app starts using a camera',
+        type: 'checkbox',
+        checked: prefs.askOnCameraUse,
+        click: (item) => sendToStudio('prefs:set', { askOnCameraUse: item.checked }),
+      },
+      {
+        label: 'Start with Windows',
+        type: 'checkbox',
+        checked: prefs.startWithWindows,
+        click: (item) => sendToStudio('prefs:set', { startWithWindows: item.checked }),
+      },
+      { type: 'separator' },
+      { label: 'Quit Brainbox VirtualCam', click: quitApp },
+    ]);
+  tray.setContextMenu(menu());
+  tray.on('click', openStudio);
+  tray.rebuild = () => tray.setContextMenu(menu());
+}
+
+function applyPrefs(next) {
+  prefs = { ...prefs, ...next };
+  if (app.isPackaged && !SMOKE && (process.platform === 'win32' || process.platform === 'darwin')) {
+    app.setLoginItemSettings({ openAtLogin: Boolean(prefs.startWithWindows), args: ['--background'] });
+  }
+  if (tray && tray.rebuild) tray.rebuild();
+}
+
+// A small card in the corner of the screen, above every window, with a question and buttons.
+// payload: { title, body, actions: [{ id, label, primary }], timeoutMs }
+function showPrompt(payload) {
+  const { workArea } = screen.getPrimaryDisplay();
+  const width = 400;
+  const height = 190;
+  if (!promptWindow || promptWindow.isDestroyed()) {
+    promptWindow = new BrowserWindow({
+      width,
+      height,
+      x: workArea.x + workArea.width - width - 16,
+      y: workArea.y + workArea.height - height - 16,
+      frame: false,
+      resizable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      show: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    hardenContents(promptWindow.webContents);
+    promptWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    promptWindow.setAlwaysOnTop(true, 'screen-saver');
+    promptWindow.loadFile(path.join(DIST, 'prompt.html'));
+    promptWindow.once('ready-to-show', () => {
+      promptWindow.webContents.send('prompt:data', promptWindow.payload);
+      promptWindow.showInactive();
+    });
+  } else {
+    promptWindow.webContents.send('prompt:data', payload);
+    promptWindow.showInactive();
+  }
+  promptWindow.payload = payload;
+  clearTimeout(promptWindow.timer);
+  promptWindow.timer = setTimeout(() => hidePrompt(), payload.timeoutMs || 45000);
+}
+
+function hidePrompt() {
+  if (promptWindow && !promptWindow.isDestroyed()) promptWindow.hide();
 }
 
 function showSwitcher() {
@@ -293,6 +422,47 @@ function registerHotkeys() {
 // ---------- IPC ----------
 
 function registerIpc() {
+  // App preferences (tray, start with Windows, ask on camera use), owned by the studio's settings.
+  ipcMain.handle('prefs:apply', (_e, next) => {
+    if (next && typeof next === 'object') {
+      applyPrefs({
+        runInBackground: next.runInBackground !== false,
+        startWithWindows: next.startWithWindows !== false,
+        askOnCameraUse: next.askOnCameraUse !== false,
+      });
+    }
+    return prefs;
+  });
+  // The corner question card: the studio decides what to ask; clicks go back to the studio.
+  ipcMain.handle('prompt:show', (_e, payload) => {
+    if (!payload || typeof payload !== 'object') return false;
+    const clean = {
+      title: String(payload.title || '').slice(0, 120),
+      body: String(payload.body || '').slice(0, 400),
+      actions: (Array.isArray(payload.actions) ? payload.actions : []).slice(0, 3).map((a) => ({
+        id: String(a.id).slice(0, 40),
+        label: String(a.label).slice(0, 40),
+        primary: Boolean(a.primary),
+      })),
+      timeoutMs: Math.min(120000, Math.max(5000, Number(payload.timeoutMs) || 45000)),
+    };
+    showPrompt(clean);
+    return true;
+  });
+  ipcMain.handle('prompt:action', (e, id) => {
+    if (!promptWindow || e.sender !== promptWindow.webContents) return false;
+    hidePrompt();
+    if (id === 'open') openStudio();
+    sendToStudio('prompt:action', String(id));
+    return true;
+  });
+  ipcMain.handle('app:info', () => ({ version: app.getVersion(), name: 'Brainbox VirtualCam', packaged: app.isPackaged }));
+  ipcMain.handle('updates:check', () => (updater ? updater.check() : null));
+  ipcMain.handle('updates:install', () => {
+    if (updater && updater.state.status === 'ready') updater.install();
+    return true;
+  });
+
   ipcMain.handle('state:load', () => readJson('state.json'));
   ipcMain.handle('state:save', (_e, state) => {
     if (state && typeof state === 'object') writeJson('state.json', state);
@@ -357,7 +527,7 @@ function registerIpc() {
     if (!faceWorker) {
       const logFile = engineLogFile();
       faceWorker = utilityProcess.fork(path.join(__dirname, 'faceswap', 'worker.js'), [], {
-        serviceName: 'VirtualCam Face Engine',
+        serviceName: 'Brainbox VirtualCam Face Engine',
         stdio: 'pipe',
         env: { ...process.env, VCAM_ENGINE_LOG: logFile },
       });
@@ -405,7 +575,7 @@ function registerIpc() {
   ipcMain.handle('models:status', () => ({ ...modelStatus(modelsDir()), busy: Boolean(downloader && downloader.busy) }));
 
   ipcMain.handle('models:download', async (_e, pack) => {
-    if (pack !== 'core' && pack !== 'boost') throw new Error('Unknown model pack');
+    if (pack !== 'core' && pack !== 'boost' && pack !== 'fast') throw new Error('Unknown model pack');
     if (!downloader) downloader = new Downloader(modelsDir());
     let lastSent = 0;
     return downloader.download(pack, (p) => {
@@ -483,7 +653,21 @@ app.whenReady().then(() => {
     }
   });
 
-  camera = new CameraDriver({ binDir: vendorDir(), onState: (state) => sendToStudio('camera:state', state) });
+  let cameraInUse = false;
+  camera = new CameraDriver({
+    binDir: vendorDir(),
+    onState: (state) => {
+      sendToStudio('camera:state', state);
+      // A video app just opened the Brainbox VirtualCam camera.
+      if (state.inUse && !cameraInUse) sendToStudio('camera-use', { kind: 'ours' });
+      cameraInUse = Boolean(state.inUse);
+    },
+  });
+  // Another app turning on a camera (usually your real webcam): the studio may ask to switch.
+  cameraWatch = new CameraWatch({ onStart: ({ name }) => sendToStudio('camera-use', { kind: 'other', app: name }) });
+  if (!SMOKE) cameraWatch.start();
+  createTray();
+  updater = setupUpdater((state) => sendToStudio('updates:state', state));
   registerIpc();
   registerHotkeys();
   createMainWindow();
@@ -503,7 +687,12 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  app.isQuitting = true;
+});
+
 app.on('will-quit', () => {
+  if (cameraWatch) cameraWatch.stop();
   globalShortcut.unregisterAll();
   if (camera) camera.stop();
   if (faceWorker) faceWorker.kill();
@@ -511,5 +700,7 @@ app.on('will-quit', () => {
 });
 
 app.on('window-all-closed', () => {
+  // With the tray on, the app keeps running; the prompt card closing must never quit it either.
+  if (tray && prefs.runInBackground && !app.isQuitting) return;
   app.quit();
 });

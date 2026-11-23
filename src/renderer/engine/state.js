@@ -76,7 +76,16 @@ export function defaultState() {
 }
 
 function defaultSettings() {
-  return { pricePerSecond: 0, faceBoost: false, cameraOutput: true, orientation: 'landscape' };
+  return {
+    pricePerSecond: 0,
+    faceBoost: false,
+    cameraOutput: true,
+    orientation: 'landscape',
+    localModel: 'best',
+    runInBackground: true,
+    startWithWindows: true,
+    askOnCameraUse: true,
+  };
 }
 
 function str(value, fallback = '', max = 2000) {
@@ -146,6 +155,10 @@ export function normalizeState(raw) {
       faceBoost: Boolean(rawSettings.faceBoost),
       cameraOutput: rawSettings.cameraOutput !== false,
       orientation: rawSettings.orientation === 'portrait' ? 'portrait' : 'landscape',
+      localModel: rawSettings.localModel === 'fast' ? 'fast' : 'best',
+      runInBackground: rawSettings.runInBackground !== false,
+      startWithWindows: rawSettings.startWithWindows !== false,
+      askOnCameraUse: rawSettings.askOnCameraUse !== false,
     },
   };
 }

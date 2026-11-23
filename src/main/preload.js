@@ -72,6 +72,19 @@ contextBridge.exposeInMainWorld('vcam', {
   onEngineExit: (handler) => listen('faceengine:exit', handler),
   showEngineLog: () => ipcRenderer.invoke('faceengine:log'),
 
+  // App preferences, the corner question card, camera use by other apps, updates.
+  applyPrefs: (prefs) => ipcRenderer.invoke('prefs:apply', prefs),
+  onPrefsSet: (handler) => listen('prefs:set', handler),
+  showPrompt: (payload) => ipcRenderer.invoke('prompt:show', payload),
+  onPromptAction: (handler) => listen('prompt:action', handler),
+  onPromptData: (handler) => listen('prompt:data', handler),
+  promptAction: (id) => ipcRenderer.invoke('prompt:action', id),
+  onCameraUse: (handler) => listen('camera-use', handler),
+  appInfo: () => ipcRenderer.invoke('app:info'),
+  checkUpdates: () => ipcRenderer.invoke('updates:check'),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  onUpdates: (handler) => listen('updates:state', handler),
+
   hardwareCheck: () => ipcRenderer.invoke('hardware:check'),
   modelsStatus: () => ipcRenderer.invoke('models:status'),
   modelsDownload: (pack) => ipcRenderer.invoke('models:download', pack),

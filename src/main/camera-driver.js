@@ -1,11 +1,12 @@
 'use strict';
 
-// The VirtualCam camera device on Windows: install/uninstall it, and stream frames into it.
+// The Brainbox VirtualCam camera device on Windows: install/uninstall it, and stream frames into it.
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
 
 const CLSID = '{9CF79DDE-DA6F-46F4-886A-4ED6ED6A99A4}';
+const CAMERA_NAME = 'Brainbox VirtualCam'; // must match FILTER_NAME in native/softcam/src/softcam/softcam.cpp
 
 function run(cmd, args, timeout = 15000) {
   return new Promise((resolve) => {
@@ -49,7 +50,7 @@ class CameraDriver {
 
   async refresh() {
     if (!this.state.supported) {
-      this.emit({ message: 'The VirtualCam camera device is Windows only for now. Use OBS with the output window.' });
+      this.emit({ message: 'The Brainbox VirtualCam camera device is Windows only for now. Use OBS with the output window.' });
       return this.state;
     }
     const f = this.files();
@@ -59,10 +60,19 @@ class CameraDriver {
     }
     // Registered, and pointing at this copy of the app?
     const res = await run('reg.exe', ['query', `HKCR\\CLSID\\${CLSID}\\InprocServer32`, '/ve']);
-    const registered = res.code === 0 && res.stdout.toLowerCase().includes(f.dll64.toLowerCase());
+    const here = res.code === 0 && res.stdout.toLowerCase().includes(f.dll64.toLowerCase());
+    // Registered under the current name? (Versions before 1.1 called the camera "VirtualCam".)
+    const name = await run('reg.exe', ['query', `HKCR\\CLSID\\${CLSID}`, '/ve']);
+    const named = name.code === 0 && name.stdout.includes(CAMERA_NAME);
+    const registered = here && named;
     this.emit({
       installed: registered,
-      message: registered ? '' : res.code === 0 ? 'The camera points at an older copy of the app. Install it again.' : '',
+      needsUpdate: res.code === 0 && !registered,
+      message: registered
+        ? ''
+        : res.code === 0
+          ? 'The camera needs a one-time update after the app update (new name and location). Click Install the camera.'
+          : '',
     });
     return this.state;
   }
@@ -132,7 +142,7 @@ class CameraDriver {
       this.emit({
         running: false,
         inUse: false,
-        message: code === 2 ? 'Another copy of VirtualCam is already sending to the camera.' : this.state.message,
+        message: code === 2 ? 'Another copy of Brainbox VirtualCam is already sending to the camera.' : this.state.message,
       });
     });
     return true;

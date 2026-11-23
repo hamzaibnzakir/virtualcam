@@ -86,7 +86,7 @@ async function handle(msg) {
         onStep('loading the AI runtime');
         loadRuntime();
         swapper = new FaceSwapper(ort, msg.modelsDir);
-        const info = await swapper.load({ preferred: msg.preferred || 'auto', gpuCount: msg.gpuCount || 0, onStep, log });
+        const info = await swapper.load({ preferred: msg.preferred || 'auto', gpuCount: msg.gpuCount || 0, swapFile: msg.swapFile || null, onStep, log });
         log(`load: done in ${Date.now() - started} ms on ${info.deviceLabel} (${info.swapMs} ms per swap)`);
         reply({ type: 'loaded', ...info });
         break;

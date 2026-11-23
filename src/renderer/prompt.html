@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'">
+<title>Brainbox VirtualCam</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #EEF0F6; padding: 6px; box-sizing: border-box; }
+  .card {
+    height: 100%; box-sizing: border-box; padding: 16px 16px 14px; border-radius: 16px;
+    background: linear-gradient(160deg, #1A1C28 0%, #12131B 100%);
+    border: 1px solid #2B2E3D; box-shadow: 0 12px 32px rgba(0,0,0,.45);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .head { display: flex; align-items: center; gap: 10px; }
+  .head img { width: 22px; height: 22px; border-radius: 6px; }
+  .title { font-weight: 600; font-size: 14px; flex: 1; }
+  .close { background: none; border: 0; color: #8E93A6; font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .body { color: #B9BDCC; flex: 1; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  button.act {
+    border-radius: 10px; padding: 7px 12px; border: 1px solid #343849; background: #1F2230; color: #EEF0F6;
+    font: inherit; cursor: pointer;
+  }
+  button.act.primary { background: #7CF0C2; border-color: #7CF0C2; color: #0B0C12; font-weight: 600; }
+  button:focus-visible { outline: 2px solid #A99BFF; outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <div class="card" role="alertdialog" aria-labelledby="title" aria-describedby="body">
+    <div class="head">
+      <img src="brand/icon.png" alt="">
+      <div class="title" id="title"></div>
+      <button type="button" class="close" id="close" aria-label="Dismiss">×</button>
+    </div>
+    <div class="body" id="body"></div>
+    <div class="actions" id="actions"></div>
+  </div>
+  <script src="prompt.js"></script>
+</body>
+</html>
