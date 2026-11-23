@@ -115,7 +115,8 @@ export function normalizeScene(raw) {
     },
     ai: {
       enabled: Boolean(ai.enabled),
-      engine: AI_ENGINES.includes(ai.engine) ? ai.engine : 'cloud',
+      // Lite and Local are one engine since 1.1 (Local uses Lite's warp until its AI models are downloaded).
+      engine: ai.engine === 'lite' ? 'local' : AI_ENGINES.includes(ai.engine) ? ai.engine : 'cloud',
       mode: AI_MODES.includes(ai.mode) ? ai.mode : 'restyle',
       prompt: str(ai.prompt, '', 1000),
       enhance: ai.enhance !== false,

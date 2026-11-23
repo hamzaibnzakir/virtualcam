@@ -179,7 +179,9 @@ async function applyScene() {
   sources.use(scene.source);
 
   const wantAi = scene.ai.enabled;
-  const engine = wantAi ? scene.ai.engine : 'none';
+  let engine = wantAi ? scene.ai.engine : 'none';
+  // Local: the AI face swap (with Lite's tracking), or Lite's quick warp until the AI models are downloaded.
+  if (engine === 'local' && !models.core) engine = 'lite';
   if (engine !== activeEngine) {
     activeEngine = engine;
     aiState = engine === 'cloud' ? cloudState : engine === 'local' ? local.state : engine === 'lite' ? lite.state : 'off';
@@ -353,7 +355,7 @@ function renderInspector() {
   $('ai-engine').value = scene.ai.engine;
   $('cloud-group').hidden = scene.ai.engine !== 'cloud';
   $('local-group').hidden = scene.ai.engine !== 'local';
-  $('lite-group').hidden = scene.ai.engine !== 'lite';
+  $('lite-group').hidden = !(scene.ai.engine === 'local' && !models.core);
   $('ai-mode').value = scene.ai.referencePath ? 'edit' : scene.ai.mode;
   $('ai-mode').disabled = Boolean(scene.ai.referencePath);
   setPressed($('toggle-enhance'), scene.ai.enhance);
@@ -400,8 +402,8 @@ function renderPreviewMeta() {
   const ref = scene.ai.referencePath;
   $('ref-title').textContent = ref ? `Becoming: ${fileName(ref)}` : 'Drop a photo or click to choose';
   $('ref-sub').textContent = ref
-    ? scene.ai.engine === 'lite'
-      ? 'You wear this face. Your eyes, mouth, hair and moves stay yours.'
+    ? isLocal && !models.core
+      ? 'Quick warp for now: you wear this face. Download the AI models for the full face swap.'
       : isLocal
       ? 'Your face becomes this face. Your hair, clothes and moves stay yours.'
       : 'The cloud AI turns you into this person: face, hair and outfit, following your moves.'
@@ -985,7 +987,7 @@ function bindEvents() {
 
   $('ai-engine').addEventListener('change', (e) => {
     const value = e.target.value;
-    activeScene().ai.engine = value === 'local' || value === 'lite' ? value : 'cloud';
+    activeScene().ai.engine = value === 'local' ? 'local' : 'cloud';
     changed();
   });
   $('btn-models').addEventListener('click', () => startDownload('core'));
@@ -1222,7 +1224,7 @@ async function start() {
     local.gpuCount = ((info && info.gpus) || []).filter((g) => !/microsoft (basic|remote)/i.test(g.name)).length;
     renderLocal();
   });
-  refreshModels();
+  refreshModels().then(() => applyScene());
   cameraState = await api.cameraStatus();
   renderCamera();
   await syncCamera();
@@ -1336,12 +1338,16 @@ async function runSmokeTest() {
       const scene = makeScene({
         name: 'Smoke lite warp',
         source: { type: 'image', filePath: api.smokeFiles.face },
-        ai: { enabled: true, engine: 'lite', referencePath: api.smokeFiles.ref },
+        ai: { enabled: true, engine: 'local', referencePath: api.smokeFiles.ref },
       });
+      // Local without its AI models runs Lite's quick warp: test that path by hiding the models for a moment.
+      const realModels = models;
+      models = { ...models, core: false };
       state.scenes.push(scene);
       selectScene(scene.id);
       const until = Date.now() + 60000;
       while (Date.now() < until && !(lite.state === 'generating' && lite.faceFound && lite.frame > 10)) await wait(250);
+      models = realModels;
       const step = { step: 'lite-warp', aiState, delegate: lite.delegate, faceFound: lite.faceFound, frames: lite.frame, ms: lite.stats.ms, fps: lite.stats.fps };
       if (api.smokeFiles.liteOut) {
         const png = await new Promise((r) => lite.canvas.toBlob(r, 'image/png'));
@@ -1425,10 +1431,13 @@ async function runSmokeTest() {
       const portraitStep = { step: 'portrait' };
       const liteScene = state.scenes.find((s) => s.name === 'Smoke lite warp');
       liteScene.fit = 'fit';
+      const savedModels = models;
+      models = { ...models, core: false }; // this scene runs as the quick warp (see the lite step)
       selectScene(liteScene.id);
       const startFrame = lite.frame;
       const until = Date.now() + 60000;
       while (Date.now() < until && lite.frame < startFrame + 5) await wait(250);
+      models = savedModels;
       const program = $('program');
       portraitStep.program = `${program.width}x${program.height}`;
       portraitStep.lite = `${lite.canvas.width}x${lite.canvas.height}`;
