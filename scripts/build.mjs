@@ -27,7 +27,7 @@ await build({
   legalComments: 'none',
 });
 
-for (const file of ['studio.html', 'switcher.html', 'prompt.html', 'styles.css']) {
+for (const file of ['studio.html', 'switcher.html', 'prompt.html', 'call-test.html', 'styles.css']) {
   cpSync(join(root, 'src/renderer', file), join(out, file));
 }
 
@@ -44,5 +44,18 @@ for (const file of ['face_landmarker.task', 'selfie_multiclass_256x256.tflite'])
 // Brand images (icon on the prompt card and in the studio).
 mkdirSync(join(out, 'brand'), { recursive: true });
 cpSync(join(root, 'assets/brand/icon.png'), join(out, 'brand', 'icon.png'));
+
+// The voice changer runs as an AudioWorklet module (its own file, ES module format).
+await build({
+  entryPoints: { 'voice-worklet': join(root, 'src/renderer/voice-worklet.js') },
+  bundle: true,
+  format: 'esm',
+  platform: 'browser',
+  target: 'chrome130',
+  outdir: out,
+  minify: true,
+  logLevel: 'warning',
+  legalComments: 'none',
+});
 
 console.log('Built renderer into dist/');

@@ -152,7 +152,7 @@ kbd {
 .preview-panel { min-width: 0; gap: 14px; align-self: start; max-height: 100%; }
 .inspector { min-width: 0; display: flex; flex-direction: column; gap: 12px; padding-right: 2px; }
 .tabs {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px;
   border-radius: 13px; background: var(--field); border: 1px solid var(--line);
   position: sticky; top: 0; z-index: 2;
 }
@@ -350,3 +350,19 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 @media (prefers-reduced-motion: reduce) {
   .switch span { transition: none; }
 }
+
+/* ---------- voice & calls ---------- */
+.voice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.voice-grid button {
+  min-height: 40px; border-radius: 11px; border: 1px solid var(--line-2);
+  background: var(--field); color: var(--soft); font-weight: 600; font-size: 13px;
+}
+.voice-grid button:first-child { grid-column: 1 / -1; }
+.voice-grid button[aria-pressed="true"] {
+  border-color: rgba(155, 140, 255, 0.6); color: var(--text);
+  background: linear-gradient(135deg, rgba(155, 140, 255, 0.22), rgba(124, 240, 194, 0.10));
+}
+.meter { height: 6px; border-radius: 999px; background: var(--field); overflow: hidden; }
+.meter span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--violet)); transition: width 0.08s linear; }
+.call-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.call-grid .btn { min-height: 36px; font-size: 13px; }

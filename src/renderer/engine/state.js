@@ -85,6 +85,8 @@ function defaultSettings() {
     runInBackground: true,
     startWithWindows: true,
     askOnCameraUse: true,
+    voice: 'own',
+    micId: '',
   };
 }
 
@@ -160,6 +162,8 @@ export function normalizeState(raw) {
       runInBackground: rawSettings.runInBackground !== false,
       startWithWindows: rawSettings.startWithWindows !== false,
       askOnCameraUse: rawSettings.askOnCameraUse !== false,
+      voice: ['own', 'young-man', 'young-woman', 'older-man', 'older-woman'].includes(rawSettings.voice) ? rawSettings.voice : 'own',
+      micId: typeof rawSettings.micId === 'string' ? rawSettings.micId.slice(0, 200) : '',
     },
   };
 }

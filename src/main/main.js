@@ -33,6 +33,11 @@ const DIST = path.join(__dirname, '..', '..', 'dist');
 const PRELOAD = path.join(__dirname, 'preload.js');
 const MAX_FILE_BYTES = 512 * 1024 * 1024;
 
+// The studio and the Calls window talk over a local WebRTC link. Chromium normally hides local
+// addresses behind .local names that need a working mDNS service to resolve, which isn't always the
+// case (blocked by firewalls or VPNs), so the link would never connect. Show plain local addresses.
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
+
 if (SMOKE) {
   // Headless test run: fake camera (unless testing real devices), auto-accept prompts, throwaway profile.
   if (process.env.VCAM_SMOKE_REAL_DEVICES !== '1') app.commandLine.appendSwitch('use-fake-device-for-media-stream');
@@ -63,6 +68,7 @@ let cameraWatch = null;
 // Preferences the studio sends (settings dialog); defaults until it does.
 let prefs = { runInBackground: true, startWithWindows: true, askOnCameraUse: true };
 let toldAboutTray = false;
+let callWindow = null;
 
 let mainWindow = null;
 let switcherWindow = null;
@@ -244,6 +250,84 @@ function createMainWindow() {
 
 function sendToStudio(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+// ---------- Calls: web call apps inside the app, fed Brainbox's picture and voice ----------
+const CALLS_PRELOAD = path.join(__dirname, 'calls-preload.js');
+const CALL_SITES = {
+  whatsapp: 'https://web.whatsapp.com/',
+  meet: 'https://meet.google.com/',
+  zoom: 'https://app.zoom.us/wc',
+  discord: 'https://discord.com/app',
+  telegram: 'https://web.telegram.org/',
+  messenger: 'https://www.messenger.com/',
+  teams: 'https://teams.live.com/',
+};
+
+function callSession() {
+  const ses = session.fromPartition('persist:calls');
+  if (!ses.brainboxReady) {
+    ses.brainboxReady = true;
+    // Look like plain Chrome: some sites refuse browsers they don't know.
+    ses.setUserAgent(ses.getUserAgent().replace(/\s(Electron|brainbox-virtualcam|virtualcam|Brainbox VirtualCam)\/\S+/gi, ''));
+    ses.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(['media', 'notifications', 'clipboard-sanitized-write', 'fullscreen', 'clipboard-read'].includes(permission));
+    });
+  }
+  return ses;
+}
+
+function openCall(target) {
+  const url = CALL_SITES[target] || (SMOKE && target === 'smoke-test' ? `file://${path.join(DIST, 'call-test.html')}` : null)
+    || (typeof target === 'string' && /^https:\/\/[^\s]+$/.test(target) ? target : null);
+  if (!url) return false;
+  if (callWindow && !callWindow.isDestroyed()) {
+    callWindow.loadURL(url);
+    callWindow.show();
+    callWindow.focus();
+    return true;
+  }
+  callWindow = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    title: 'Brainbox VirtualCam · Calls',
+    backgroundColor: '#0B0C10',
+    autoHideMenuBar: true,
+    icon: path.join(BRAND, 'icon.png'),
+    show: !SMOKE,
+    webPreferences: {
+      session: callSession(),
+      preload: CALLS_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      nodeIntegrationInSubFrames: true, // the camera/mic swap also runs inside embedded call frames
+      backgroundThrottling: false,
+    },
+  });
+  callWindow.webContents.setWindowOpenHandler(({ url: next }) => {
+    // Pop-ups of the same site (meeting windows, sign-in) stay inside; other links go to the browser.
+    try {
+      const host = new URL(next).host;
+      if (host && host === new URL(callWindow.webContents.getURL()).host) return { action: 'allow' };
+    } catch {
+      // fall through
+    }
+    if (/^https:\/\//.test(next)) shell.openExternal(next);
+    return { action: 'deny' };
+  });
+  callWindow.on('closed', () => {
+    callWindow = null;
+    sendToStudio('call:closed', {});
+  });
+  if (SMOKE) {
+    callWindow.webContents.on('console-message', (event, legacyLevel, legacyMessage) => {
+      smokeLog.push({ level: 'warning', message: `[calls] ${event.message ?? legacyMessage}` });
+    });
+    callWindow.webContents.on('preload-error', (_e, file, err) => smokeLog.push({ level: 'error', message: `[calls] preload ${file}: ${err.message}` }));
+  }
+  callWindow.loadURL(url);
+  return true;
 }
 
 function openStudio() {
@@ -456,6 +540,25 @@ function registerIpc() {
     sendToStudio('prompt:action', String(id));
     return true;
   });
+  // Calls: open a site; relay the WebRTC link messages between call pages (any frame) and the studio.
+  ipcMain.handle('calls:open', (_e, target) => openCall(target));
+  ipcMain.on('call:signal', (e, data) => {
+    if (SMOKE) smokeLog.push({ level: 'warning', message: `[calls] signal ${data && data.type} ${data && data.candidate ? data.candidate.candidate : ''}` });
+    if (!callWindow || callWindow.isDestroyed() || e.sender !== callWindow.webContents) return;
+    sendToStudio('call:signal', { id: `${e.processId}:${e.frameId}`, data });
+  });
+  ipcMain.handle('call:signal-to', (_e, id, data) => {
+    if (!callWindow || callWindow.isDestroyed() || typeof id !== 'string') return false;
+    const [processId, frameId] = id.split(':').map(Number);
+    callWindow.webContents.sendToFrame([processId, frameId], 'call:signal', data);
+    return true;
+  });
+  if (SMOKE) {
+    ipcMain.handle('smoke:call-result', async () => {
+      if (!callWindow || callWindow.isDestroyed()) return null;
+      return callWindow.webContents.executeJavaScript('window.__testResult || null').catch(() => null);
+    });
+  }
   ipcMain.handle('app:info', () => ({ version: app.getVersion(), name: 'Brainbox VirtualCam', packaged: app.isPackaged }));
   ipcMain.handle('updates:check', () => (updater ? updater.check() : null));
   ipcMain.handle('updates:install', () => {

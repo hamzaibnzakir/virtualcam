@@ -85,6 +85,13 @@ contextBridge.exposeInMainWorld('vcam', {
   installUpdate: () => ipcRenderer.invoke('updates:install'),
   onUpdates: (handler) => listen('updates:state', handler),
 
+  // Calls window: open a web call app; the WebRTC link that carries the picture and voice into it.
+  openCall: (target) => ipcRenderer.invoke('calls:open', target),
+  onCallSignal: (handler) => listen('call:signal', handler),
+  callSignal: (id, data) => ipcRenderer.invoke('call:signal-to', id, data),
+  onCallClosed: (handler) => listen('call:closed', handler),
+  smokeCallResult: () => ipcRenderer.invoke('smoke:call-result'),
+
   hardwareCheck: () => ipcRenderer.invoke('hardware:check'),
   modelsStatus: () => ipcRenderer.invoke('models:status'),
   modelsDownload: (pack) => ipcRenderer.invoke('models:download', pack),

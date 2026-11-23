@@ -3,6 +3,8 @@ import { DecartAI } from './engine/ai-decart.js';
 import { LiteFaceAI } from './engine/ai-lite.js';
 import { LocalFaceAI } from './engine/ai-local.js';
 import { LookLayers } from './engine/look-layers.js';
+import { VoiceStudio, VOICES } from './engine/voice.js';
+import { CallLink } from './engine/call-link.js';
 import { Compositor } from './engine/compositor.js';
 import { SourceManager } from './engine/sources.js';
 import {
@@ -812,6 +814,90 @@ function handlePromptAction(id) {
   }
 }
 
+// ---------- voice & calls ----------
+
+const voice = new VoiceStudio({ onState: () => renderVoice() });
+let callVideoTrack = null;
+const calls = new CallLink({
+  api,
+  // The same picture as the output window and the camera.
+  videoTrack: () => {
+    if (!callVideoTrack || callVideoTrack.readyState !== 'live') callVideoTrack = $('program').captureStream(OUTPUT_FPS).getVideoTracks()[0];
+    return callVideoTrack;
+  },
+  // A call that connects turns the microphone on (through the chosen voice).
+  audioTrack: async () => {
+    if (!voice.running) await voice.start();
+    return voice.track;
+  },
+  onState: () => renderVoice(),
+});
+let callOpen = false;
+
+function renderVoice() {
+  if (!state) return;
+  const grid = $('voice-presets');
+  if (!grid.childElementCount) {
+    for (const [id, v] of Object.entries(VOICES)) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.voice = id;
+      btn.textContent = v.label;
+      btn.addEventListener('click', () => {
+        state.settings.voice = id;
+        voice.setVoice(id);
+        changed();
+        renderVoice();
+      });
+      grid.append(btn);
+    }
+  }
+  grid.querySelectorAll('button').forEach((b) => setPressed(b, b.dataset.voice === state.settings.voice));
+  $('btn-voice-mic').textContent = voice.running ? 'Turn off microphone' : 'Turn on microphone';
+  const pitch = voice.speakerF0 ? ` Your speaking pitch: ${Math.round(voice.speakerF0)} Hz.` : '';
+  $('voice-line').textContent = voice.error
+    ? `Microphone problem: ${voice.error}`
+    : voice.running
+      ? `Live: ${VOICES[state.settings.voice].label}.${pitch}${voice.speakerF0 ? '' : ' Say a sentence so the voice can tune itself to you.'}`
+      : 'Pick a voice, then turn on the microphone to try it.';
+  setPressed($('toggle-monitor'), voice.monitor);
+  const connected = calls.connected;
+  $('call-status').textContent = connected
+    ? `Call window is getting your picture and ${VOICES[state.settings.voice].label.toLowerCase()}`
+    : callOpen
+      ? 'Call window open. Start or join a call there.'
+      : 'No call window open';
+  $('call-status').className = `ai-status${connected ? ' on' : ''}`;
+}
+
+async function fillMics() {
+  const select = $('mic-select');
+  const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+  const mics = devices.filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+  select.textContent = '';
+  const def = document.createElement('option');
+  def.value = '';
+  def.textContent = 'Default microphone';
+  select.append(def);
+  mics.forEach((m, i) => {
+    const opt = document.createElement('option');
+    opt.value = m.deviceId;
+    opt.textContent = m.label || `Microphone ${i + 1}`;
+    select.append(opt);
+  });
+  select.value = mics.some((m) => m.deviceId === state.settings.micId) ? state.settings.micId : '';
+}
+
+async function openCallSite(target) {
+  const ok = await api.openCall(target);
+  if (!ok) {
+    showToast('That link must start with https://', true);
+    return;
+  }
+  callOpen = true;
+  renderVoice();
+}
+
 // ---------- updates ----------
 
 let updateState = { status: 'idle', version: '' };
@@ -1016,6 +1102,39 @@ function bindEvents() {
     local.reload();
     showToast(want === 'fast' ? 'Switched to the fast model' : 'Switched to the best-quality model');
   });
+  // Voice & calls
+  voice.setVoice(state.settings.voice);
+  voice.micId = state.settings.micId;
+  $('btn-voice-mic').addEventListener('click', async () => {
+    if (voice.running) voice.stop();
+    else await voice.start();
+    await calls.replaceAudio(voice.track);
+    fillMics();
+    renderVoice();
+  });
+  $('mic-select').addEventListener('change', async (e) => {
+    state.settings.micId = e.target.value;
+    changed();
+    await voice.setMic(e.target.value);
+    await calls.replaceAudio(voice.track);
+  });
+  $('toggle-monitor').addEventListener('click', () => {
+    voice.setMonitor(!voice.monitor);
+    renderVoice();
+  });
+  document.querySelectorAll('#call-sites [data-site]').forEach((b) => b.addEventListener('click', () => openCallSite(b.dataset.site)));
+  $('btn-call-url').addEventListener('click', () => openCallSite($('call-url').value.trim()));
+  api.onCallClosed(() => {
+    callOpen = false;
+    renderVoice();
+  });
+  const meterLoop = () => {
+    $('voice-meter').style.width = `${Math.round(voice.meter() * 100)}%`;
+    setTimeout(meterLoop, 80);
+  };
+  meterLoop();
+  fillMics();
+  renderVoice();
   $('toggle-ask').addEventListener('click', () => setPref('askOnCameraUse', !state.settings.askOnCameraUse));
   $('toggle-bg').addEventListener('click', () => setPref('runInBackground', !state.settings.runInBackground));
   $('toggle-login').addEventListener('click', () => setPref('startWithWindows', !state.settings.startWithWindows));
@@ -1419,6 +1538,23 @@ async function runSmokeTest() {
         lookStep.saved = await api.smokeSave(api.smokeFiles.lookOut, new Uint8Array(await png.arrayBuffer()));
       }
       report.steps.push(lookStep);
+
+      // Calls window: a test page asks for a camera and microphone like a call app; it must get the
+      // studio's picture and the (changed) voice.
+      state.settings.voice = 'young-woman';
+      voice.setVoice('young-woman');
+      await api.openCall('smoke-test');
+      const callUntil = Date.now() + 120000;
+      let callResult = null;
+      while (Date.now() < callUntil) {
+        callResult = await api.smokeCallResult();
+        if (callResult && callResult.stage !== 'starting') break;
+        await wait(500);
+      }
+      const callStep = { step: 'calls', result: callResult, connected: calls.connected, voiceRunning: voice.running, voiceError: voice.error };
+      callStep.ok = Boolean(callResult && callResult.stage === 'done' && callResult.brightness > 5 && callResult.audioLive && callResult.video !== '0x0');
+      report.steps.push(callStep);
+      if (!callStep.ok) failures.push('the Calls window did not get the picture and voice');
       if (!look.photo) failures.push('hair/outfit: the photo could not be read');
     }
 

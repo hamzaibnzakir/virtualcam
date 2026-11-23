@@ -94,7 +94,45 @@
       <div class="tabs" role="tablist" aria-label="Scene settings">
         <button type="button" role="tab" id="tab-look" data-tab="look" aria-selected="true">Look</button>
         <button type="button" role="tab" id="tab-scene" data-tab="scene" aria-selected="false">Picture</button>
+        <button type="button" role="tab" id="tab-voice" data-tab="voice" aria-selected="false">Voice &amp; calls</button>
       </div>
+
+      <section class="panel panel-look" data-tab="voice" hidden>
+        <div class="toggle-row">
+          <h3 id="voice-h">Voice</h3>
+          <button type="button" class="btn btn-small" id="btn-voice-mic">Turn on microphone</button>
+        </div>
+        <div class="voice-grid" id="voice-presets" role="group" aria-label="Voice"></div>
+        <div class="meter" aria-hidden="true"><span id="voice-meter"></span></div>
+        <div class="muted small" id="voice-line">Pick a voice, then turn on the microphone to try it.</div>
+        <label for="mic-select">Microphone</label>
+        <select id="mic-select"></select>
+        <div class="toggle-row">
+          <span id="monitor-label">Hear myself <span class="muted small">(use headphones)</span></span>
+          <button type="button" class="switch" id="toggle-monitor" aria-labelledby="monitor-label"><span></span></button>
+        </div>
+        <div class="muted small">These voices are voice effects for now. Trained AI voices replace them when they're ready.</div>
+      </section>
+
+      <section class="panel" data-tab="voice" hidden>
+        <h3>Calls</h3>
+        <div class="muted small">Opens the call app inside Brainbox: it gets your face and voice straight away, with nothing to install. In the app, pick "Brainbox VirtualCam" and "Brainbox Voice" if it asks.</div>
+        <div class="call-grid" id="call-sites">
+          <button type="button" class="btn" data-site="whatsapp">WhatsApp</button>
+          <button type="button" class="btn" data-site="meet">Google Meet</button>
+          <button type="button" class="btn" data-site="zoom">Zoom</button>
+          <button type="button" class="btn" data-site="discord">Discord</button>
+          <button type="button" class="btn" data-site="telegram">Telegram</button>
+          <button type="button" class="btn" data-site="messenger">Messenger</button>
+          <button type="button" class="btn" data-site="teams">Teams</button>
+        </div>
+        <label for="call-url">Or a meeting link</label>
+        <div class="row">
+          <input id="call-url" type="text" placeholder="https://meet.google.com/abc-defg-hij" autocomplete="off">
+          <button type="button" class="btn btn-accent" id="btn-call-url">Open</button>
+        </div>
+        <div class="ai-status" id="call-status">No call window open</div>
+      </section>
 
       <section class="panel" data-tab="scene">
         <div class="field">

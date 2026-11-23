@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Call test</title></head>
+<body>
+<!-- Self-test page for the Calls window: behaves like a call app asking for a camera and microphone. -->
+<video id="v" muted playsinline autoplay></video>
+<canvas id="c" width="64" height="36"></canvas>
+<script>
+window.__testResult = { stage: 'starting' };
+(async () => {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    let stream = null;
+    for (let i = 0; i < 3 && !stream; i += 1) {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280 }, audio: { echoCancellation: true } }).catch((e) => {
+        window.__testResult = { stage: 'starting', retry: i + 1, last: String(e.message) };
+        return null;
+      });
+    }
+    if (!stream) throw new Error(window.__testResult.last);
+    const v = document.getElementById('v');
+    v.srcObject = stream;
+    await v.play();
+    await new Promise((r) => setTimeout(r, 2500));
+    const c = document.getElementById('c').getContext('2d');
+    c.drawImage(v, 0, 0, 64, 36);
+    const px = c.getImageData(0, 0, 64, 36).data;
+    let sum = 0;
+    for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+    const audio = stream.getAudioTracks()[0];
+    const ctx = new AudioContext();
+    const an = ctx.createAnalyser();
+    ctx.createMediaStreamSource(new MediaStream([audio])).connect(an);
+    await new Promise((r) => setTimeout(r, 1500));
+    const buf = new Float32Array(an.fftSize);
+    an.getFloatTimeDomainData(buf);
+    let rms = 0;
+    for (const s of buf) rms += s * s;
+    window.__testResult = {
+      stage: 'done',
+      devices: devices.map((d) => `${d.kind}:${d.label}`),
+      video: `${v.videoWidth}x${v.videoHeight}`,
+      brightness: Math.round(sum / (px.length / 4) / 3),
+      audioLive: audio && audio.readyState === 'live',
+      audioRms: Number(Math.sqrt(rms / buf.length).toFixed(4)),
+    };
+  } catch (err) {
+    window.__testResult = { stage: 'error', error: String(err && err.message || err) };
+  }
+})();
+</script>
+</body></html>
