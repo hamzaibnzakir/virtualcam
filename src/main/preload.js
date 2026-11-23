@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('vcam', {
           localOut: process.env.VCAM_SMOKE_LOCAL_OUT || '',
           lookOut: process.env.VCAM_SMOKE_LOOK_OUT || '',
           voices: Boolean(process.env.VCAM_SMOKE_VOICE_DIR),
+          tab: process.env.VCAM_SMOKE_TAB || '',
         }
       : null,
 
@@ -81,6 +82,8 @@ contextBridge.exposeInMainWorld('vcam', {
   voiceEngineStart: () => ipcRenderer.invoke('voiceengine:start'),
   voiceEngineStop: () => ipcRenderer.invoke('voiceengine:stop'),
   onVoiceEngineExit: (handler) => listen('voiceengine:exit', handler),
+  deleteMyVoice: (id) => ipcRenderer.invoke('voices:delete', id),
+  saveVoiceMessage: (bytes, name) => ipcRenderer.invoke('voicemsg:save', bytes, name),
 
   // App preferences, the corner question card, camera use by other apps, updates.
   applyPrefs: (prefs) => ipcRenderer.invoke('prefs:apply', prefs),

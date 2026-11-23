@@ -45,6 +45,7 @@ export class AiVoiceEngine {
   receive(msg) {
     if (!msg) return;
     if (msg.type === 'info') this.onInfo(msg);
+    if (msg.type === 'prepare-progress') (this.progressListeners || []).forEach((l) => l(msg));
     const left = [];
     for (const w of this.waiters) {
       if (msg.type === w.type || (msg.type === 'error' && msg.request === w.request)) {
@@ -85,8 +86,8 @@ export class AiVoiceEngine {
         const res = await this.api.voiceEngineStart();
         if (!res || !res.ok) throw new Error('The voice engine could not start');
         await gotPorts;
-        const loaded = await this.request({ type: 'load', modelsDir: res.modelsDir, preferred: 'auto', gpuCount }, 'loaded', 180000);
-        this.loaded = { device: loaded.device, ms: loaded.ms };
+        await this.request({ type: 'load', modelsDir: res.modelsDir, voicesDir: res.voicesDir, preferred: 'auto', gpuCount }, 'loaded', 30000);
+        this.loaded = { device: null };
         this.voiceFile = null;
         this.error = '';
         return this.loaded;
@@ -99,11 +100,42 @@ export class AiVoiceEngine {
     return this.starting;
   }
 
+  // voice: { kind: 'trained', file, sr, f0 } or { kind: 'mine', id }. The first voice of each kind
+  // loads its models (several seconds).
   async setVoice(voice) {
     await this.start();
-    if (this.voiceFile === voice.file) return;
-    await this.request({ type: 'voice', voice }, 'voice', 120000);
-    this.voiceFile = voice.file;
+    const key = voice.kind === 'mine' ? `mine:${voice.id}` : `trained:${voice.file}`;
+    if (this.voiceFile === key) return;
+    const r = await this.request({ type: 'voice', voice }, 'voice', 180000);
+    this.loaded = { device: r.device, ms: r.ms };
+    this.voiceFile = key;
+  }
+
+  // Prepares a voice from an upload (16 kHz mono). onProgress(0..1). Resolves { id, seconds, quality }.
+  async prepare(id, pcm, onProgress = () => {}) {
+    await this.start();
+    const listen = (info) => {
+      if (info.type === 'prepare-progress' && info.id === id) onProgress(info.progress);
+    };
+    this.progressListeners = [...(this.progressListeners || []), listen];
+    try {
+      return await this.request({ type: 'prepare', id, pcm }, 'prepared', 15 * 60000);
+    } finally {
+      this.progressListeners = this.progressListeners.filter((l) => l !== listen);
+    }
+  }
+
+  // Converts a whole recording (voice messages). Resolves { pcm, rate }.
+  async convert(voice, pcm) {
+    await this.start();
+    const r = await this.request({ type: 'convert', voice, pcm }, 'converted', 10 * 60000);
+    // The live voice may have changed engines for this; ask again next time.
+    return { pcm: r.pcm, rate: r.rate };
+  }
+
+  off() {
+    if (this.control) this.control.postMessage({ type: 'off' });
+    this.voiceFile = null;
   }
 
   async stats() {

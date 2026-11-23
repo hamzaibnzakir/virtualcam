@@ -370,3 +370,16 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 /* AI voices block in the Voice panel */
 .ai-voice-box { display: grid; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
 .ai-voice-box .btn { justify-self: start; }
+
+/* My voices */
+.myvoice-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.myvoice-list li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--field); border: 1px solid var(--line); }
+.myvoice-list li .grow { flex: 1; min-width: 0; }
+.myvoice-list li .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.myvoice-list li .ready { color: var(--accent); font-size: 12px; }
+.myvoice-list li.empty { justify-content: center; color: var(--muted); font-size: 12px; }
+.av-reading { padding: 10px 12px; border-radius: 10px; background: var(--field); border: 1px solid var(--line); max-height: 180px; overflow: auto; }
+.av-reading p { margin: 6px 0 8px; line-height: 1.5; }
+label.check { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; }
+label.check input { margin-top: 2px; }
+#vm-audio { width: 100%; }

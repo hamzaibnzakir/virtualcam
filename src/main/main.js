@@ -81,6 +81,11 @@ let hardwareCache = null;
 let downloader = null;
 let camera = null;
 
+// Voices made from your own uploads (their prepared data only; the upload itself isn't kept).
+function voicesDir() {
+  return path.join(app.getPath('userData'), 'voices');
+}
+
 function modelsDir() {
   return process.env.VCAM_MODELS_DIR || path.join(app.getPath('userData'), 'models');
 }
@@ -583,7 +588,9 @@ function registerIpc() {
     const filters =
       kind === 'video'
         ? [{ name: 'Video', extensions: ['mp4', 'webm', 'mov', 'm4v'] }]
-        : [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }];
+        : kind === 'audio'
+          ? [{ name: 'Voice recording', extensions: ['wav', 'mp3', 'm4a', 'aac', 'ogg', 'opus', 'flac', 'webm', 'mp4', 'mov'] }]
+          : [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }];
     const result = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'], filters });
     return result.canceled || !result.filePaths[0] ? null : result.filePaths[0];
   });
@@ -679,7 +686,23 @@ function registerIpc() {
     const audio = new MessageChannelMain();
     voiceWorker.postMessage({ type: 'ports' }, [control.port1, audio.port1]);
     mainWindow.webContents.postMessage('voiceengine:ports', null, [control.port2, audio.port2]);
-    return { ok: true, modelsDir: modelsDir() };
+    return { ok: true, modelsDir: modelsDir(), voicesDir: voicesDir() };
+  });
+
+  ipcMain.handle('voices:delete', async (_e, id) => {
+    if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id)) throw new Error('Bad voice id');
+    await fs.promises.rm(path.join(voicesDir(), `${id}.voice`), { force: true });
+    return true;
+  });
+
+  // Saves a converted voice message where you choose (a .wav file any chat app can send).
+  ipcMain.handle('voicemsg:save', async (_e, bytes, suggested) => {
+    if (!(bytes instanceof Uint8Array) || bytes.length > 200 * 1024 * 1024) throw new Error('Bad recording');
+    const name = typeof suggested === 'string' && /^[\w .-]{1,80}\.wav$/.test(suggested) ? suggested : 'voice-message.wav';
+    const result = await dialog.showSaveDialog(mainWindow, { defaultPath: path.join(app.getPath('downloads'), name), filters: [{ name: 'Sound', extensions: ['wav'] }] });
+    if (result.canceled || !result.filePath) return null;
+    await fs.promises.writeFile(result.filePath, bytes);
+    return result.filePath;
   });
 
   ipcMain.handle('voiceengine:stop', () => {
@@ -714,7 +737,7 @@ function registerIpc() {
   ipcMain.handle('models:status', () => ({ ...modelStatus(modelsDir()), busy: Boolean(downloader && downloader.busy) }));
 
   ipcMain.handle('models:download', async (_e, pack) => {
-    if (pack !== 'core' && pack !== 'boost' && pack !== 'fast' && pack !== 'voices') throw new Error('Unknown model pack');
+    if (pack !== 'core' && pack !== 'boost' && pack !== 'fast' && pack !== 'voices' && pack !== 'myvoice') throw new Error('Unknown model pack');
     if (!downloader) downloader = new Downloader(modelsDir());
     let lastSent = 0;
     return downloader.download(pack, (p) => {
@@ -787,6 +810,12 @@ function installSmokeVoices() {
   const voice = { file: 'voice-test.onnx', sr: 40000, f0: 200 };
   const manifest = { version: 0, files, voices: { 'young-man': voice, 'young-woman': voice, 'older-man': voice, 'older-woman': voice } };
   fs.writeFileSync(path.join(dir, 'voice-models.json'), JSON.stringify(manifest));
+  const mine = ['wavlm6.onnx', 'knn-vocoder.onnx', 'knn-match.onnx'].map((file) => {
+    const data = fs.readFileSync(path.join(src, file));
+    fs.writeFileSync(path.join(dir, file), data);
+    return { file, label: file, url: `https://github.com/smoke/${file}`, sha256: crypto.createHash('sha256').update(data).digest('hex'), bytes: data.length };
+  });
+  fs.writeFileSync(path.join(dir, 'my-voice-models.json'), JSON.stringify({ version: 0, files: mine }));
 }
 
 app.whenReady().then(() => {

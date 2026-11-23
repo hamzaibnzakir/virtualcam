@@ -6,13 +6,14 @@ model, Apache-2.0) reading public-domain books, then RVC v2 (via Applio, MIT) is
 Steps (all logged to /kaggle/working/run.log, summed up in status.json):
   1. set up: Applio at a fixed commit, Kokoro, their downloads
   2. per voice: ~20 minutes of Kokoro speech -> Applio preprocess -> extract -> train -> export ONNX
-  3. the two shared speech models (contentvec.onnx, rmvpe.onnx)
+  3. the two shared speech models (contentvec.onnx, rmvpe.onnx), and the three "My voices" models
+     (wavlm6.onnx, knn-vocoder.onnx, knn-match.onnx: voices from uploads, no training; done first)
   4. sample clips (another Kokoro voice converted into each voice), measured pitch, sizes, fingerprints
-  5. voice-models.json: the manifest the app downloads from
+  5. voice-models.json and my-voice-models.json: the manifests the app downloads from
 
 Output, in /kaggle/working/:
   status.json, run.log
-  upload/       everything to publish: voice-models.json + contentvec.onnx + rmvpe.onnx + voice-*.onnx
+  upload/       everything to publish: voice-models.json, my-voice-models.json and every .onnx file
   samples/      before/after clips per voice (listen to these)
   datasets/     the generated speech (kept small: first 30 clips per voice)
 
@@ -44,6 +45,9 @@ SR = 40000
 APPLIO_REPO = "https://github.com/IAHispano/Applio.git"
 APPLIO_COMMIT = "445b0f6"
 APPLIO = os.environ.get("APPLIO_DIR", os.path.join(WORK, "applio"))
+KNNVC_REPO = "https://github.com/bshall/knn-vc.git"
+KNNVC_COMMIT = "c616845"
+KNNVC = os.environ.get("KNNVC_DIR", os.path.join(WORK, "knn-vc"))
 RELEASE_BASE = "https://github.com/hamzaibnzakir/brainbox-virtualcam-releases/releases/download/models-voice"
 
 # Kokoro voices used as teachers (computer-made voices; no real person's recordings).
@@ -330,8 +334,33 @@ def main():
     sys.path.insert(0, kit)
     upload = os.path.join(W, "upload")
     os.makedirs(upload, exist_ok=True)
+    # A previous run attached as an input (kernel_sources): keep everything it made.
+    for prev in glob.glob(os.path.join(INPUT, "**", "upload", "voice-models.json"), recursive=True):
+        src = os.path.dirname(prev)
+        for f in os.listdir(src):
+            if not os.path.exists(os.path.join(upload, f)):
+                shutil.copy(os.path.join(src, f), upload)
+        stage("previous run", True, folder=src, files=sorted(os.listdir(src)))
 
-    # Shared models first (needed to measure pitch and make samples).
+    # "My voices" models first: they need no training, so they're ready even if a voice fails later.
+    try:
+        if not all(os.path.exists(os.path.join(upload, f)) for f in ("wavlm6.onnx", "knn-vocoder.onnx", "knn-match.onnx")):
+            if not os.path.exists(os.path.join(KNNVC, "matcher.py")):
+                run(["git", "clone", "-q", KNNVC_REPO, KNNVC])
+            run(["git", "checkout", "-q", KNNVC_COMMIT], cwd=KNNVC)
+            run([sys.executable, os.path.join(kit, "export_clone.py"), "--knnvc", KNNVC, "--out", upload, "--cache", WORK])
+        files = []
+        for f in ("wavlm6.onnx", "knn-vocoder.onnx", "knn-match.onnx"):
+            p = os.path.join(upload, f)
+            files.append({"file": f, "label": {"wavlm6.onnx": "Speech reader", "knn-vocoder.onnx": "Voice maker", "knn-match.onnx": "Voice matcher"}[f],
+                          "url": f"{RELEASE_BASE}/{f}", "sha256": sha256(p), "bytes": os.path.getsize(p)})
+        with open(os.path.join(upload, "my-voice-models.json"), "w") as fh:
+            json.dump({"version": int(time.strftime("%Y%m%d")), "files": files}, fh, indent=2)
+        stage("my voice models", True, mb={f["file"]: round(f["bytes"] / 1e6, 1) for f in files})
+    except Exception as err:  # noqa: BLE001
+        stage("my voice models", False, error=str(err)[-1500:])
+
+    # Shared models (needed to measure pitch and make samples).
     shared_ok = all(os.path.exists(os.path.join(upload, f)) for f in ("contentvec.onnx", "rmvpe.onnx"))
     if not shared_ok:
         run([sys.executable, os.path.join(kit, "export_shared.py"), "--contentvec-dir", os.path.join(APPLIO, "rvc", "models", "embedders", "contentvec"), "--out", upload])

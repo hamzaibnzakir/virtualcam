@@ -140,6 +140,38 @@ async function fetchVoiceManifest(fetchImpl = fetch) {
   }
 }
 
+// "My voices" (voices from your own uploads, no training) need three models of their own, published
+// under the same release tag: { version, files: [{ file, label, url, sha256, bytes }] }.
+const MY_VOICE_MANIFEST_URL =
+  'https://github.com/hamzaibnzakir/brainbox-virtualcam-releases/releases/download/models-voice/my-voice-models.json';
+const MY_VOICE_LOCAL = 'my-voice-models.json';
+const MY_VOICE_FILES = ['wavlm6.onnx', 'knn-vocoder.onnx', 'knn-match.onnx'];
+
+function validMyVoiceManifest(m) {
+  if (!m || !Array.isArray(m.files) || !m.files.every(validVoiceFile)) return null;
+  const names = new Set(m.files.map((f) => f.file));
+  if (!MY_VOICE_FILES.every((f) => names.has(f))) return null;
+  return { version: m.version || 1, files: m.files };
+}
+
+function myVoiceLocal(modelsDir) {
+  try {
+    return validMyVoiceManifest(JSON.parse(fs.readFileSync(path.join(modelsDir, MY_VOICE_LOCAL), 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+async function fetchMyVoiceManifest(fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(MY_VOICE_MANIFEST_URL, { redirect: 'follow' });
+    if (!res.ok) return null;
+    return validMyVoiceManifest(await res.json());
+  } catch {
+    return null;
+  }
+}
+
 function packFiles(pack, extra = []) {
   return [...MODELS, ...extra].filter((m) => m.pack === pack);
 }
@@ -160,6 +192,7 @@ function status(modelsDir) {
   const fast = fastLocal(modelsDir);
   const voice = voiceLocal(modelsDir);
   const voiceFilesOk = Boolean(voice && voice.files.every(present));
+  const mine = myVoiceLocal(modelsDir);
   return {
     core: packFiles('core').every(present),
     boost: packFiles('boost').every(present),
@@ -167,6 +200,7 @@ function status(modelsDir) {
     fastFile: fast && present(fast) ? fast.file : null,
     voices: voiceFilesOk ? voice.voices : null,
     voicesVersion: voiceFilesOk ? voice.version : null,
+    myVoice: Boolean(mine && mine.files.every(present)),
     coreBytes: packBytes('core'),
     boostBytes: packBytes('boost'),
   };
@@ -201,6 +235,12 @@ class Downloader {
       if (!voicePack) throw new Error("The AI voices aren't published yet. The voice effects work in the meantime.");
       extra = voicePack.files.map((f) => ({ ...f, label: f.label || 'AI voice', pack: 'voices' }));
     }
+    let myPack = null;
+    if (pack === 'myvoice') {
+      myPack = await fetchMyVoiceManifest(fetchImpl);
+      if (!myPack) throw new Error("The models for your own voices aren't published yet.");
+      extra = myPack.files.map((f) => ({ ...f, label: f.label || 'Voice model', pack: 'myvoice' }));
+    }
     const files = packFiles(pack, extra);
     if (!files.length) throw new Error(`Unknown model pack ${pack}`);
     fs.mkdirSync(this.modelsDir, { recursive: true });
@@ -226,6 +266,9 @@ class Downloader {
     }
     if (pack === 'voices') {
       fs.writeFileSync(path.join(this.modelsDir, VOICE_LOCAL), JSON.stringify(voicePack));
+    }
+    if (pack === 'myvoice') {
+      fs.writeFileSync(path.join(this.modelsDir, MY_VOICE_LOCAL), JSON.stringify(myPack));
     }
     if (pack === 'fast') {
       const { file, url, sha256, bytes, version } = extra[0];
@@ -266,4 +309,4 @@ class Downloader {
   }
 }
 
-module.exports = { MODELS, Downloader, status, packBytes, fetchFastManifest, FAST_MANIFEST_URL, fetchVoiceManifest, validVoiceManifest, VOICE_MANIFEST_URL, VOICE_IDS };
+module.exports = { MODELS, Downloader, status, packBytes, fetchFastManifest, FAST_MANIFEST_URL, fetchVoiceManifest, validVoiceManifest, VOICE_MANIFEST_URL, VOICE_IDS, validMyVoiceManifest, MY_VOICE_MANIFEST_URL, MY_VOICE_FILES };

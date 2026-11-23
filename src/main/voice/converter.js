@@ -376,4 +376,4 @@ class VoiceConverter {
   }
 }
 
-module.exports = { VoiceConverter, CONTENT_FILE, PITCH_FILE };
+module.exports = { VoiceConverter, CONTENT_FILE, PITCH_FILE, sessionOptions, deviceCandidates, deviceLabel };

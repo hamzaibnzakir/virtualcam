@@ -89,6 +89,9 @@ function defaultSettings() {
     micId: '',
     aiVoices: true,
     voiceConsent: false,
+    myVoices: {},
+    sendFace: true,
+    sendVoice: true,
   };
 }
 
@@ -164,12 +167,36 @@ export function normalizeState(raw) {
       runInBackground: rawSettings.runInBackground !== false,
       startWithWindows: rawSettings.startWithWindows !== false,
       askOnCameraUse: rawSettings.askOnCameraUse !== false,
-      voice: ['own', 'young-man', 'young-woman', 'older-man', 'older-woman'].includes(rawSettings.voice) ? rawSettings.voice : 'own',
+      myVoices: normalizeMyVoices(rawSettings.myVoices),
+      voice:
+        ['own', 'young-man', 'young-woman', 'older-man', 'older-woman'].includes(rawSettings.voice) ||
+        (typeof rawSettings.voice === 'string' && rawSettings.voice.startsWith('mine:') && normalizeMyVoices(rawSettings.myVoices)[rawSettings.voice.slice(5)])
+          ? rawSettings.voice
+          : 'own',
+      // Where the changes go: the Brainbox picture and/or the changed voice (calls and voice messages).
+      sendFace: rawSettings.sendFace !== false,
+      sendVoice: rawSettings.sendVoice !== false,
       micId: typeof rawSettings.micId === 'string' ? rawSettings.micId.slice(0, 200) : '',
       aiVoices: rawSettings.aiVoices !== false,
       voiceConsent: rawSettings.voiceConsent === true,
     },
   };
+}
+
+// Voices made from your uploads: { <id>: { name, seconds, quality, created } }.
+function normalizeMyVoices(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [id, v] of Object.entries(raw).slice(0, 50)) {
+    if (!/^[\w-]{1,64}$/.test(id) || !v || typeof v.name !== 'string') continue;
+    out[id] = {
+      name: v.name.slice(0, 40),
+      seconds: Number(v.seconds) || 0,
+      quality: ['great', 'good', 'basic'].includes(v.quality) ? v.quality : 'basic',
+      created: Number(v.created) || 0,
+    };
+  }
+  return out;
 }
 
 export function sourceLabel(type) {

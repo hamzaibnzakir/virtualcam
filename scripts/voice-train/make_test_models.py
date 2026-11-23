@@ -93,10 +93,55 @@ def voice_model(sr=40000):
     return helper.make_model(g, opset_imports=OPSET, ir_version=8)
 
 
+def wavlm_model():
+    # audio [1, N] -> feats [1, T, 1024], T = floor((N - 400) / 320) + 1 (like WavLM): loudness in every slot
+    nodes = [
+        helper.make_node("Abs", ["audio"], ["aa"]),
+        helper.make_node("Unsqueeze", ["aa", "ax1"], ["a3"]),
+        helper.make_node("Conv", ["a3", "w"], ["c"], kernel_shape=[400], strides=[320]),
+        helper.make_node("Transpose", ["c"], ["ct"], perm=[0, 2, 1]),
+        helper.make_node("Mul", ["ct", "ones"], ["feats"]),
+    ]
+    inits = [const("ax1", [1], np.int64), const("w", np.full((1, 1, 400), 1 / 400)), const("ones", np.linspace(0.5, 1.5, 1024))]
+    g = helper.make_graph(
+        nodes, "wavlm",
+        [helper.make_tensor_value_info("audio", TensorProto.FLOAT, [1, "N"])],
+        [helper.make_tensor_value_info("feats", TensorProto.FLOAT, [1, "T", 1024])], inits)
+    return helper.make_model(g, opset_imports=OPSET, ir_version=8)
+
+
+def knn_vocoder_model():
+    # feats [1, T, 1024] -> audio [1, 1, T*320]: a 180 Hz hum as loud as the features
+    nodes = [
+        helper.make_node("ReduceMean", ["feats"], ["m"], axes=[2], keepdims=1),  # [1, T, 1]
+        helper.make_node("Expand", ["m", "hopshape"], ["me"]),  # [1, T, 320]
+        helper.make_node("Reshape", ["me", "flat"], ["env"]),  # [1, S]
+        helper.make_node("Mul", ["env", "zero"], ["z"]),
+        helper.make_node("Add", ["z", "step"], ["steps"]),
+        helper.make_node("CumSum", ["steps", "one0"], ["phase"]),
+        helper.make_node("Sin", ["phase"], ["s"]),
+        helper.make_node("Mul", ["s", "env"], ["s1"]),
+        helper.make_node("Mul", ["s1", "gain"], ["s2"]),
+        helper.make_node("Unsqueeze", ["s2", "ax1"], ["audio"]),
+    ]
+    inits = [const("hopshape", [1, 1, 320], np.int64), const("flat", [1, -1], np.int64), const("zero", 0.0), const("step", 2 * np.pi * 180 / 16000),
+             const("one0", 1, np.int64), const("gain", 4.0), const("ax1", [1], np.int64)]
+    g = helper.make_graph(
+        nodes, "knn-vocoder",
+        [helper.make_tensor_value_info("feats", TensorProto.FLOAT, [1, "T", 1024])],
+        [helper.make_tensor_value_info("audio", TensorProto.FLOAT, [1, 1, "S"])], inits)
+    return helper.make_model(g, opset_imports=OPSET, ir_version=8)
+
+
 if __name__ == "__main__":
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    for name, model in [("contentvec.onnx", content_model()), ("rmvpe.onnx", pitch_model()), ("voice-test.onnx", voice_model())]:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from export_clone import match_model
+
+    models = [("contentvec.onnx", content_model()), ("rmvpe.onnx", pitch_model()), ("voice-test.onnx", voice_model()),
+              ("wavlm6.onnx", wavlm_model()), ("knn-vocoder.onnx", knn_vocoder_model()), ("knn-match.onnx", match_model())]
+    for name, model in models:
         onnx.checker.check_model(model)
         onnx.save(model, os.path.join(out, name))
         print(name, os.path.getsize(os.path.join(out, name)), "bytes")

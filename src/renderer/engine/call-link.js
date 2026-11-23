@@ -3,7 +3,7 @@
 export class CallLink {
   constructor({ api, videoTrack, audioTrack, onState = () => {} }) {
     this.api = api;
-    this.videoTrack = videoTrack; // () => MediaStreamTrack
+    this.videoTrack = videoTrack; // async () => MediaStreamTrack
     this.audioTrack = audioTrack; // async () => MediaStreamTrack
     this.onState = onState;
     this.peers = new Map(); // frame id -> RTCPeerConnection
@@ -31,7 +31,7 @@ export class CallLink {
     const pc = new RTCPeerConnection({ iceServers: [] });
     this.peers.set(id, pc);
     const stream = new MediaStream();
-    const video = this.videoTrack();
+    const video = await this.videoTrack();
     const audio = await this.audioTrack();
     pc.addTrack(video, stream);
     pc.addTrack(audio, stream);
@@ -72,6 +72,13 @@ export class CallLink {
   async replaceAudio(track) {
     for (const pc of this.peers.values()) {
       for (const sender of pc.getSenders()) if (sender.track && sender.track.kind === 'audio') await sender.replaceTrack(track);
+    }
+  }
+
+  // The picture changed (Brainbox picture <-> your real camera): swap it into every link.
+  async replaceVideo(track) {
+    for (const pc of this.peers.values()) {
+      for (const sender of pc.getSenders()) if (sender.track && sender.track.kind === 'video') await sender.replaceTrack(track);
     }
   }
 

@@ -4,6 +4,7 @@ import { LiteFaceAI } from './engine/ai-lite.js';
 import { LocalFaceAI } from './engine/ai-local.js';
 import { LookLayers } from './engine/look-layers.js';
 import { VoiceStudio, VOICES } from './engine/voice.js';
+import { voiceParams } from './engine/voice-dsp.js';
 import { CallLink } from './engine/call-link.js';
 import { Compositor } from './engine/compositor.js';
 import { SourceManager } from './engine/sources.js';
@@ -827,14 +828,12 @@ let callVideoTrack = null;
 const calls = new CallLink({
   api,
   // The same picture as the output window and the camera.
-  videoTrack: () => {
-    if (!callVideoTrack || callVideoTrack.readyState !== 'live') callVideoTrack = $('program').captureStream(OUTPUT_FPS).getVideoTracks()[0];
-    return callVideoTrack;
-  },
+  // The Brainbox picture, or your real camera when "My face" is off.
+  videoTrack: () => callVideo(),
   // A call that connects turns the microphone on (through the chosen voice).
   audioTrack: async () => {
     if (!voice.running) await voice.start();
-    return voice.track;
+    return callAudio();
   },
   onState: () => renderVoice(),
 });
@@ -843,35 +842,38 @@ let callOpen = false;
 function renderVoice() {
   if (!state) return;
   const grid = $('voice-presets');
-  if (!grid.childElementCount) {
-    for (const [id, v] of Object.entries(VOICES)) {
+  // The presets, then your own voices.
+  const choices = [...Object.entries(VOICES).map(([id, v]) => [id, v.label]), ...Object.entries(state.settings.myVoices).map(([id, v]) => [`mine:${id}`, v.name])];
+  const key = choices.map((c) => c.join('=')).join('|');
+  if (grid.dataset.key !== key) {
+    grid.dataset.key = key;
+    grid.textContent = '';
+    for (const [id, label] of choices) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.dataset.voice = id;
-      btn.textContent = v.label;
-      btn.addEventListener('click', () => {
-        state.settings.voice = id;
-        voice.setVoice(id);
-        changed();
-        renderVoice();
-      });
+      btn.textContent = label;
+      btn.addEventListener('click', () => chooseVoice(id));
       grid.append(btn);
     }
   }
   grid.querySelectorAll('button').forEach((b) => setPressed(b, b.dataset.voice === state.settings.voice));
   $('btn-voice-mic').textContent = voice.running ? 'Turn off microphone' : 'Turn on microphone';
   const pitch = voice.speakerF0 ? ` Your speaking pitch: ${Math.round(voice.speakerF0)} Hz.` : '';
-  const kind = state.settings.voice === 'own' ? '' : voice.aiLive ? ' (AI voice)' : ' (voice effect)';
+  const mine = state.settings.voice.startsWith('mine:');
+  const kind = state.settings.voice === 'own' ? '' : voice.aiLive ? ' (AI voice)' : mine ? ' (getting ready: your own voice for now)' : ' (voice effect)';
   $('voice-line').textContent = voice.error
     ? `Microphone problem: ${voice.error}`
     : voice.running
-      ? `Live: ${VOICES[state.settings.voice].label}${kind}.${pitch}${voice.speakerF0 ? '' : ' Say a sentence so the voice can tune itself to you.'}`
+      ? `Live: ${voiceLabel(state.settings.voice)}${kind}.${pitch}${voice.speakerF0 ? '' : ' Say a sentence so the voice can tune itself to you.'}`
       : 'Pick a voice, then turn on the microphone to try it.';
   setPressed($('toggle-monitor'), voice.monitor);
   renderAiVoice();
+  renderMyVoices();
+  renderSend();
   const connected = calls.connected;
   $('call-status').textContent = connected
-    ? `Call window is getting your picture and ${VOICES[state.settings.voice].label.toLowerCase()}`
+    ? `Call window is getting ${state.settings.sendFace ? 'your Brainbox picture' : 'your real camera'} and ${state.settings.sendVoice ? voiceLabel(state.settings.voice).toLowerCase() : 'your natural voice'}`
     : callOpen
       ? 'Call window open. Start or join a call there.'
       : 'No call window open';
@@ -905,13 +907,14 @@ function renderAiVoice() {
   }
   btn.hidden = voice.aiSummary() !== 'error';
   btn.textContent = 'Try the AI voice again';
-  const name = VOICES[state.settings.voice].label.toLowerCase();
+  const name = voiceLabel(state.settings.voice).toLowerCase();
   const summary = voice.aiSummary();
   const where = voice.ai && voice.ai.loaded ? ` on ${voice.ai.loaded.device}` : '';
   const text = {
     disabled: ['AI voices off: using voice effects', ''],
     idle: ['AI voices ready', 'Pick a voice above to use it.'],
     missing: ['This voice has no AI version yet', 'It plays as a voice effect.'],
+    'mine-missing': ['Voice models needed', 'Open "Add a voice" to download them (one time), then pick this voice again.'],
     off: ['AI voices ready', voice.running ? '' : 'Turn on the microphone to hear it.'],
     loading: [`Starting the AI ${name}…`, 'The voice effect plays until it is ready (a few seconds).'],
     on: [`AI ${name} live${where}`, 'About half a second behind you, like a phone call.'],
@@ -946,7 +949,351 @@ function askVoiceConsent() {
 
 function applyAiVoices() {
   voice.gpuCount = local.gpuCount || 0;
+  voice.setMyVoices(state.settings.myVoices, models.myVoice);
   voice.setAiVoices(models.voices, state.settings.aiVoices && state.settings.voiceConsent);
+}
+
+// ---------- what calls get: face and/or voice ----------
+
+let realCamTrack = null;
+
+// Your real camera (not Brainbox's own camera device), for calls with "My face" off.
+async function realCamera() {
+  if (realCamTrack && realCamTrack.readyState === 'live') return realCamTrack;
+  const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+  const cam = devices.find((d) => d.kind === 'videoinput' && !/brainbox|virtualcam/i.test(d.label));
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { deviceId: cam ? { exact: cam.deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 } },
+  });
+  realCamTrack = stream.getVideoTracks()[0];
+  return realCamTrack;
+}
+
+async function callVideo() {
+  if (!state.settings.sendFace) {
+    try {
+      return await realCamera();
+    } catch {
+      // no camera: fall back to the Brainbox picture
+    }
+  }
+  if (realCamTrack) {
+    realCamTrack.stop();
+    realCamTrack = null;
+  }
+  if (!callVideoTrack || callVideoTrack.readyState !== 'live') callVideoTrack = $('program').captureStream(OUTPUT_FPS).getVideoTracks()[0];
+  return callVideoTrack;
+}
+
+function callAudio() {
+  return state.settings.sendVoice ? voice.track : voice.rawTrack || voice.track;
+}
+
+function renderSend() {
+  const { sendFace, sendVoice } = state.settings;
+  setPressed($('toggle-send-face'), sendFace);
+  setPressed($('toggle-send-voice'), sendVoice);
+  $('send-face-note').textContent = sendFace ? '(Brainbox picture)' : '(your real camera)';
+  $('send-voice-note').textContent = sendVoice ? `(${voiceLabel(state.settings.voice).toLowerCase()})` : '(your natural voice)';
+  $('send-summary').textContent =
+    sendFace && sendVoice ? 'Face and voice both changed' : sendFace ? 'Face only: your natural voice' : sendVoice ? 'Voice only: your real face' : 'Nothing changed: your real face and voice';
+}
+
+async function setSend(key, on) {
+  state.settings[key] = on;
+  changed();
+  renderSend();
+  if (!calls.peers.size) return; // nothing to switch until a call app asks
+  if (key === 'sendFace') await calls.replaceVideo(await callVideo());
+  else await calls.replaceAudio(callAudio());
+}
+
+function voiceLabel(id) {
+  if (id && id.startsWith('mine:')) {
+    const v = state.settings.myVoices[id.slice(5)];
+    return v ? v.name : 'My voice';
+  }
+  return (VOICES[id] || VOICES.own).label;
+}
+
+// ---------- audio helpers ----------
+
+// Any audio or video file -> 16 kHz mono samples (at most 10 minutes).
+async function decodeTo16k(bytes) {
+  const ctx = new AudioContext();
+  let buf;
+  try {
+    buf = await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  } finally {
+    ctx.close();
+  }
+  const seconds = Math.min(buf.duration, 600);
+  const off = new OfflineAudioContext(1, Math.ceil(seconds * 16000), 16000);
+  const src = off.createBufferSource();
+  src.buffer = buf;
+  src.connect(off.destination);
+  src.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+
+function wavBytes(samples, rate) {
+  const b = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const str = (o, t) => [...t].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF');
+  b.setUint32(4, 36 + samples.length * 2, true);
+  str(8, 'WAVEfmt ');
+  b.setUint32(16, 16, true);
+  b.setUint16(20, 1, true);
+  b.setUint16(22, 1, true);
+  b.setUint32(24, rate, true);
+  b.setUint32(28, rate * 2, true);
+  b.setUint16(32, 2, true);
+  b.setUint16(34, 16, true);
+  str(36, 'data');
+  b.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i += 1) b.setInt16(44 + i * 2, Math.round(Math.max(-1, Math.min(1, samples[i])) * 32767), true);
+  return new Uint8Array(b.buffer);
+}
+
+// Records the microphone until stop() is called. Resolves the recording's bytes.
+async function recordMic() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { deviceId: state.settings.micId ? { exact: state.settings.micId } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+  });
+  const rec = new MediaRecorder(stream);
+  const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const done = new Promise((resolve) => {
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      resolve(new Uint8Array(await new Blob(chunks).arrayBuffer()));
+    };
+  });
+  rec.start(500);
+  const started = Date.now();
+  return { stop: () => rec.state !== 'inactive' && rec.stop(), done, seconds: () => (Date.now() - started) / 1000 };
+}
+
+const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+// ---------- my voices ----------
+
+const READ_TEXT =
+  "Hi there, this is my voice. I'm recording this so my computer can learn how I sound. " +
+  'The quick brown fox jumps over the lazy dog, and then runs all the way home before the rain. ' +
+  "Yesterday I went to the shop to buy bread, milk, eggs, and a few oranges. It was busier than usual, so I waited a while. " +
+  "Do you think it'll be sunny this weekend? I hope so, because we're planning a trip to the beach with some friends. " +
+  'Numbers are useful too: one, two, three, four, five, six, seven, eight, nine, ten. ' +
+  "When I'm happy I sometimes speak a little faster, and when I'm tired I slow right down. " +
+  "Thanks for listening! If you can hear this clearly, the recording is working well. Let's keep going for a bit longer. " +
+  'A good conversation needs questions, answers, laughs, and pauses. Really? Yes, really. Okay, great, that should be enough.';
+
+const addVoice = { pcm: null, recorder: null, timer: null, busy: false, readyId: null };
+
+function renderMyVoices() {
+  const list = $('myvoice-list');
+  list.textContent = '';
+  const entries = Object.entries(state.settings.myVoices).sort((a, b) => b[1].created - a[1].created);
+  if (!entries.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'No voices yet';
+    list.append(li);
+  }
+  for (const [id, v] of entries) {
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    info.className = 'grow';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = v.name;
+    const ready = document.createElement('div');
+    ready.className = 'ready';
+    ready.textContent = `Ready · ${Math.round(v.seconds / 6) / 10} min of speech · ${{ great: 'very close match', good: 'good match', basic: 'basic match: add more speech for better' }[v.quality]}`;
+    info.append(name, ready);
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.className = 'btn btn-small';
+    const on = state.settings.voice === `mine:${id}`;
+    use.textContent = on ? 'In use' : 'Use';
+    use.disabled = on;
+    use.addEventListener('click', () => chooseVoice(`mine:${id}`));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn btn-small';
+    del.textContent = 'Delete';
+    del.setAttribute('aria-label', `Delete ${v.name}`);
+    del.addEventListener('click', async () => {
+      await api.deleteMyVoice(id).catch(() => {});
+      delete state.settings.myVoices[id];
+      if (state.settings.voice === `mine:${id}`) chooseVoice('own');
+      changed();
+      applyAiVoices();
+      renderVoice();
+    });
+    li.append(info, use, del);
+    list.append(li);
+  }
+}
+
+function chooseVoice(id) {
+  state.settings.voice = id;
+  voice.setVoice(id);
+  changed();
+  renderVoice();
+  calls.replaceAudio(callAudio());
+}
+
+function avStatus(text, kind = '') {
+  const el = $('av-status');
+  el.hidden = !text;
+  el.textContent = text;
+  el.className = `ai-status${kind ? ` ${kind}` : ''}`;
+}
+
+function avRender() {
+  const ok = Boolean(addVoice.pcm) && $('av-consent').checked && !addVoice.busy && !addVoice.recorder;
+  $('av-make').disabled = !ok && !addVoice.readyId;
+  $('av-make').textContent = addVoice.readyId ? 'Use it now' : 'Make voice';
+  $('av-upload').disabled = addVoice.busy || Boolean(addVoice.recorder);
+  $('av-record').disabled = addVoice.busy || Boolean(addVoice.recorder);
+}
+
+function openAddVoice() {
+  Object.assign(addVoice, { pcm: null, recorder: null, busy: false, readyId: null });
+  $('av-name').value = '';
+  $('av-consent').checked = false;
+  $('av-source').textContent = '';
+  $('av-reading').hidden = true;
+  $('av-progress').hidden = true;
+  avStatus('');
+  if (!voice.ai) avStatus("Voices from uploads aren't available in this build.", 'err');
+  avRender();
+  $('add-voice').showModal();
+}
+
+async function useRecording(bytes, from) {
+  try {
+    const pcm = await decodeTo16k(bytes);
+    const seconds = pcm.length / 16000;
+    addVoice.pcm = pcm;
+    $('av-source').textContent = `${from}: ${fmtTime(seconds)} of audio${seconds < 45 ? '. That is short: 1 to 5 minutes sounds much more like the person.' : '.'}`;
+    avStatus('');
+  } catch {
+    addVoice.pcm = null;
+    avStatus("That file couldn't be read as audio. Try a .wav, .mp3 or .m4a file.", 'err');
+  }
+  avRender();
+}
+
+async function makeVoice() {
+  if (addVoice.readyId) {
+    chooseVoice(`mine:${addVoice.readyId}`);
+    $('add-voice').close();
+    return;
+  }
+  if (!addVoice.pcm || !$('av-consent').checked) return;
+  addVoice.busy = true;
+  avRender();
+  const bar = $('av-bar');
+  $('av-progress').hidden = false;
+  try {
+    if (!models.myVoice) {
+      avStatus('Downloading the voice models (one time, about 210 MB)…');
+      if (download) throw new Error('Another download is running. Try again when it finishes.');
+      await startDownload('myvoice');
+      if (!models.myVoice) throw new Error("The voice models couldn't be downloaded.");
+    }
+    const id = `v${Date.now().toString(36)}`;
+    const name = $('av-name').value.trim() || `Voice ${Object.keys(state.settings.myVoices).length + 1}`;
+    avStatus(`Getting "${name}" ready… (this takes about a minute)`, 'warn');
+    bar.style.width = '0%';
+    const r = await voice.ai.prepare(id, addVoice.pcm, (p) => {
+      bar.style.width = `${Math.round(p * 100)}%`;
+      avStatus(`Getting "${name}" ready… ${Math.round(p * 100)}%`, 'warn');
+    });
+    state.settings.myVoices[id] = { name, seconds: r.seconds, quality: r.quality, created: Date.now() };
+    changed();
+    applyAiVoices();
+    renderVoice();
+    addVoice.readyId = id;
+    bar.style.width = '100%';
+    avStatus(`Ready: "${name}" (${fmtTime(r.seconds)} of speech used). You can use it in calls and voice messages now.`, 'on');
+  } catch (err) {
+    avStatus((err && err.message) || "The voice couldn't be made.", 'err');
+  } finally {
+    addVoice.busy = false;
+    avRender();
+  }
+}
+
+// ---------- voice messages ----------
+
+const vm = { recorder: null, timer: null, result: null };
+
+async function vmToggle() {
+  if (vm.recorder) {
+    vm.recorder.stop();
+    return;
+  }
+  try {
+    vm.recorder = await recordMic();
+  } catch (err) {
+    $('vm-line').textContent = `Microphone problem: ${(err && err.message) || err}`;
+    return;
+  }
+  $('btn-vm-record').textContent = 'Stop';
+  $('vm-actions').hidden = true;
+  $('vm-audio').hidden = true;
+  $('vm-line').textContent = `Recording in ${state.settings.sendVoice ? voiceLabel(state.settings.voice) : 'your natural voice'}…`;
+  vm.timer = setInterval(() => {
+    $('vm-time').textContent = fmtTime(vm.recorder ? vm.recorder.seconds() : 0);
+  }, 250);
+  const bytes = await vm.recorder.done;
+  clearInterval(vm.timer);
+  vm.recorder = null;
+  $('btn-vm-record').textContent = 'Record';
+  $('btn-vm-record').disabled = true;
+  $('vm-line').textContent = 'Changing the voice…';
+  try {
+    const pcm16 = await decodeTo16k(bytes);
+    const { samples, rate } = await convertMessage(pcm16);
+    vm.result = wavBytes(samples, rate);
+    const audio = $('vm-audio');
+    if (audio.src) URL.revokeObjectURL(audio.src);
+    audio.src = URL.createObjectURL(new Blob([vm.result], { type: 'audio/wav' }));
+    audio.hidden = false;
+    $('vm-actions').hidden = false;
+    $('vm-line').textContent = `Ready: ${fmtTime(samples.length / rate)} in ${state.settings.sendVoice ? voiceLabel(state.settings.voice) : 'your natural voice'}. Play it, then save it.`;
+  } catch (err) {
+    $('vm-line').textContent = `Couldn't change the voice: ${(err && err.message) || err}`;
+  } finally {
+    $('btn-vm-record').disabled = false;
+  }
+}
+
+// The whole message at once: an AI voice converts it in one go (best quality); a voice effect is
+// applied offline; "My voice" off keeps it as recorded.
+async function convertMessage(pcm16) {
+  if (!state.settings.sendVoice || state.settings.voice === 'own') return { samples: pcm16, rate: 16000 };
+  const ai = voice.aiVoice;
+  if (ai) {
+    const r = await voice.ai.convert(ai, pcm16);
+    voice.apply(); // the live voice goes back to the chosen one
+    return { samples: r.pcm, rate: r.rate };
+  }
+  const off = new OfflineAudioContext(1, Math.ceil((pcm16.length / 16000) * 48000), 48000);
+  await off.audioWorklet.addModule('voice-worklet.js');
+  const buf = off.createBuffer(1, pcm16.length, 16000);
+  buf.copyToChannel(pcm16, 0);
+  const src = off.createBufferSource();
+  src.buffer = buf;
+  const node = new AudioWorkletNode(off, 'brainbox-voice', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+  node.port.postMessage(voiceParams(state.settings.voice, voice.speakerF0));
+  src.connect(node).connect(off.destination);
+  src.start();
+  const out = await off.startRendering();
+  return { samples: out.getChannelData(0), rate: 48000 };
 }
 
 async function fillMics() {
@@ -1182,12 +1529,13 @@ function bindEvents() {
     showToast(want === 'fast' ? 'Switched to the fast model' : 'Switched to the best-quality model');
   });
   // Voice & calls
+  voice.setMyVoices(state.settings.myVoices, false);
   voice.setVoice(state.settings.voice);
   voice.micId = state.settings.micId;
   $('btn-voice-mic').addEventListener('click', async () => {
     if (voice.running) voice.stop();
     else await voice.start();
-    await calls.replaceAudio(voice.track);
+    await calls.replaceAudio(callAudio());
     fillMics();
     renderVoice();
   });
@@ -1195,11 +1543,63 @@ function bindEvents() {
     state.settings.micId = e.target.value;
     changed();
     await voice.setMic(e.target.value);
-    await calls.replaceAudio(voice.track);
+    await calls.replaceAudio(callAudio());
   });
   $('toggle-monitor').addEventListener('click', () => {
     voice.setMonitor(!voice.monitor);
     renderVoice();
+  });
+  $('btn-add-voice').addEventListener('click', openAddVoice);
+  $('av-name').addEventListener('input', avRender);
+  $('av-consent').addEventListener('change', avRender);
+  $('av-upload').addEventListener('click', async () => {
+    const file = await api.pickFile('audio');
+    if (!file) return;
+    await useRecording(await api.readFile(file), fileName(file));
+  });
+  $('av-record').addEventListener('click', async () => {
+    try {
+      addVoice.recorder = await recordMic();
+    } catch (err) {
+      avStatus(`Microphone problem: ${(err && err.message) || err}`, 'err');
+      return;
+    }
+    $('av-text').textContent = READ_TEXT;
+    $('av-reading').hidden = false;
+    avRender();
+    addVoice.timer = setInterval(() => {
+      if (addVoice.recorder) $('av-timer').textContent = `${fmtTime(addVoice.recorder.seconds())} recorded (aim for 1-3 minutes; read it twice if you finish early)`;
+    }, 250);
+    const bytes = await addVoice.recorder.done;
+    clearInterval(addVoice.timer);
+    addVoice.recorder = null;
+    $('av-reading').hidden = true;
+    await useRecording(bytes, 'Your recording');
+  });
+  $('av-stop').addEventListener('click', () => addVoice.recorder && addVoice.recorder.stop());
+  $('av-make').addEventListener('click', makeVoice);
+  $('av-cancel').addEventListener('click', () => {
+    if (addVoice.recorder) addVoice.recorder.stop();
+    $('add-voice').close();
+  });
+  $('toggle-send-face').addEventListener('click', () => setSend('sendFace', !state.settings.sendFace));
+  $('toggle-send-voice').addEventListener('click', () => setSend('sendVoice', !state.settings.sendVoice));
+  $('btn-vm-record').addEventListener('click', vmToggle);
+  $('btn-vm-save').addEventListener('click', async () => {
+    if (!vm.result) return;
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    const saved = await api.saveVoiceMessage(vm.result, `voice-message-${stamp}.wav`).catch((err) => {
+      showToast((err && err.message) || 'Could not save', true);
+      return null;
+    });
+    if (saved) showToast(`Saved ${fileName(saved)}`);
+  });
+  $('btn-vm-discard').addEventListener('click', () => {
+    vm.result = null;
+    $('vm-audio').hidden = true;
+    $('vm-actions').hidden = true;
+    $('vm-line').textContent = '';
+    $('vm-time').textContent = '';
   });
   $('btn-voice-ai').addEventListener('click', async () => {
     if (models.voices) {
@@ -1226,6 +1626,10 @@ function bindEvents() {
   $('btn-call-url').addEventListener('click', () => openCallSite($('call-url').value.trim()));
   api.onCallClosed(() => {
     callOpen = false;
+    if (realCamTrack) {
+      realCamTrack.stop();
+      realCamTrack = null;
+    }
     renderVoice();
   });
   const meterLoop = () => {
@@ -1657,6 +2061,28 @@ async function runSmokeTest() {
         aiStep.ok = aiStep.live && Boolean(aiStats && aiStats.steps > 0);
         report.steps.push(aiStep);
         if (!aiStep.ok) failures.push('the AI voice engine did not convert the microphone');
+
+        // My voices: prepare a voice from a 40 s "upload", use it live, and convert a voice message.
+        const mineStep = { step: 'my-voice' };
+        try {
+          const upload = new Float32Array(16000 * 40).map((_, i) => (0.2 + 0.15 * Math.sin(i / 3000)) * Math.sin(i * 0.11) * (Math.random() * 0.5 + 0.5));
+          const prepared = await voice.ai.prepare('smoketest', upload, () => {});
+          state.settings.myVoices.smoketest = { name: 'Smoke voice', seconds: prepared.seconds, quality: prepared.quality, created: Date.now() };
+          applyAiVoices();
+          chooseVoice('mine:smoketest');
+          const mineUntil = Date.now() + 60000;
+          while (Date.now() < mineUntil && !(voice.aiLive && voice.ai.voiceFile === 'mine:smoketest') && voice.aiSummary() !== 'error') await wait(250);
+          await wait(2500);
+          const stats = await voice.ai.stats();
+          const message = await convertMessage(upload.subarray(0, 16000 * 3));
+          Object.assign(mineStep, { prepared, live: voice.aiLive, state: voice.aiSummary(), error: voice.aiError, stats, messageSeconds: message.samples.length / message.rate });
+          mineStep.ok = voice.aiLive && stats && stats.engine === 'my-voice' && stats.steps > 0 && mineStep.messageSeconds > 2.5;
+        } catch (err) {
+          mineStep.error = (err && err.message) || String(err);
+          mineStep.ok = false;
+        }
+        report.steps.push(mineStep);
+        if (!mineStep.ok) failures.push('My voices: preparing or using an uploaded voice failed');
       }
 
       // Calls window: a test page asks for a camera and microphone like a call app; it must get the
@@ -1672,7 +2098,7 @@ async function runSmokeTest() {
         await wait(500);
       }
       const callStep = { step: 'calls', result: callResult, connected: calls.connected, voiceRunning: voice.running, voiceError: voice.error };
-      callStep.ok = Boolean(callResult && callResult.stage === 'done' && callResult.brightness > 5 && callResult.audioLive && callResult.video !== '0x0');
+      callStep.ok = Boolean(callResult && callResult.stage === 'done' && callResult.brightness > 5 && callResult.audioLive && callResult.audioRms > 0.001 && callResult.video !== '0x0');
       report.steps.push(callStep);
       if (!callStep.ok) failures.push('the Calls window did not get the picture and voice');
       if (!look.photo) failures.push('hair/outfit: the photo could not be read');
@@ -1737,6 +2163,17 @@ async function runSmokeTest() {
   } catch (err) {
     report.ok = false;
     report.error = String((err && err.stack) || err);
+  }
+  if (api.smokeFiles && api.smokeFiles.tab) {
+    const [name, where] = api.smokeFiles.tab.split(':');
+    const tab = document.querySelector(`[role="tab"][data-tab="${name}"]`);
+    if (tab) tab.click();
+    await wait(300);
+    if (where === 'bottom') {
+      const panels = document.querySelectorAll(`section[data-tab="${name}"]`);
+      if (panels.length) panels[panels.length - 1].scrollIntoView({ block: 'end' });
+    }
+    await wait(500);
   }
   api.smokeReport(report);
 }

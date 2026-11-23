@@ -47,7 +47,7 @@ function writeWav(file, samples, rate) {
   fs.writeFileSync(file, b);
 }
 
-(async () => {
+async function main() {
   const [modelsDir, voiceFile, input, output, f0 = '0', sr = '40000'] = process.argv.slice(2);
   const { rate, samples } = readWav(input);
   if (rate !== 48000) throw new Error('input must be 48 kHz');
@@ -74,7 +74,12 @@ function writeWav(file, samples, rate) {
   writeWav(output, all, 48000);
   console.log(JSON.stringify({ loaded, inSeconds: samples.length / 48000, outSeconds: all.length / 48000, wallSeconds: ms / 1000, stats: vc.stats() }));
   await vc.release();
-})().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+}
+
+module.exports = { readWav, writeWav };
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

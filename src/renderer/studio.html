@@ -123,6 +123,45 @@
       </section>
 
       <section class="panel" data-tab="voice" hidden>
+        <div class="toggle-row">
+          <h3 id="myvoices-h">My voices</h3>
+          <button type="button" class="btn btn-small btn-accent" id="btn-add-voice">Add a voice</button>
+        </div>
+        <div class="muted small">Upload or record a voice (yours, or someone who said yes). Brainbox gets it ready in about a minute, then it works live like the voices above.</div>
+        <ul class="myvoice-list" id="myvoice-list" aria-labelledby="myvoices-h"></ul>
+        <div class="ai-status" id="myvoice-status" role="status" hidden></div>
+      </section>
+
+      <section class="panel" data-tab="voice" hidden>
+        <h3>What to change</h3>
+        <div class="muted small">Applies to calls and voice messages. Turn one off to send your real face or your natural voice.</div>
+        <div class="toggle-row">
+          <span id="send-face-label">My face <span class="muted small" id="send-face-note">(Brainbox picture)</span></span>
+          <button type="button" class="switch" id="toggle-send-face" aria-labelledby="send-face-label"><span></span></button>
+        </div>
+        <div class="toggle-row">
+          <span id="send-voice-label">My voice <span class="muted small" id="send-voice-note">(chosen voice)</span></span>
+          <button type="button" class="switch" id="toggle-send-voice" aria-labelledby="send-voice-label"><span></span></button>
+        </div>
+        <div class="ai-status" id="send-summary">Face and voice both changed</div>
+      </section>
+
+      <section class="panel" data-tab="voice" hidden>
+        <h3>Voice message</h3>
+        <div class="muted small">Record a message in your chosen voice and save it to send in any chat app. In WhatsApp inside Brainbox, just hold the mic button: your voice notes use the chosen voice automatically.</div>
+        <div class="row">
+          <button type="button" class="btn" id="btn-vm-record">Record</button>
+          <span class="muted small" id="vm-time"></span>
+        </div>
+        <audio id="vm-audio" controls hidden></audio>
+        <div class="row" id="vm-actions" hidden>
+          <button type="button" class="btn btn-accent" id="btn-vm-save">Save as file</button>
+          <button type="button" class="btn" id="btn-vm-discard">Discard</button>
+        </div>
+        <div class="muted small" id="vm-line"></div>
+      </section>
+
+      <section class="panel" data-tab="voice" hidden>
         <h3>Calls</h3>
         <div class="muted small">Opens the call app inside Brainbox: it gets your face and voice straight away, with nothing to install. In the app, pick "Brainbox VirtualCam" and "Brainbox Voice" if it asks.</div>
         <div class="call-grid" id="call-sites">
@@ -340,6 +379,34 @@
     <div class="dialog-actions">
       <button type="button" class="btn" id="btn-settings-cancel">Cancel</button>
       <button type="submit" class="btn btn-accent" id="btn-settings-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="add-voice" aria-labelledby="add-voice-h">
+  <form method="dialog" class="dialog-body" id="add-voice-form">
+    <h2 id="add-voice-h">Add a voice</h2>
+    <div class="field">
+      <label for="av-name">Name</label>
+      <input id="av-name" type="text" maxlength="40" placeholder="My voice" autocomplete="off">
+    </div>
+    <p class="small">Use 1 to 5 minutes of clear speech from one person, with no music or other voices. More speech sounds more like them (2 minutes or more is best).</p>
+    <div class="row">
+      <button type="button" class="btn" id="av-upload">Upload a recording</button>
+      <button type="button" class="btn" id="av-record">Record now</button>
+    </div>
+    <div id="av-reading" class="av-reading small" hidden>
+      <strong>Read this out in your normal voice:</strong>
+      <p id="av-text"></p>
+      <div class="row"><span id="av-timer" class="muted">0:00</span><button type="button" class="btn btn-small" id="av-stop">Done</button></div>
+    </div>
+    <div class="muted small" id="av-source"></div>
+    <label class="check small"><input type="checkbox" id="av-consent"> This is my own voice, or the speaker said yes to me using it. I won't use it to trick people or to get past voice checks.</label>
+    <div class="progress" id="av-progress" hidden><span id="av-bar"></span></div>
+    <div class="ai-status" id="av-status" role="status" hidden></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="av-cancel">Cancel</button>
+      <button type="button" class="btn btn-accent" id="av-make" disabled>Make voice</button>
     </div>
   </form>
 </dialog>

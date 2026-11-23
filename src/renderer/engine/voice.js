@@ -2,6 +2,8 @@
 // want to hear yourself). Each preset has two forms:
 //   - a trained AI voice (when the AI voices are downloaded): a separate engine process, ~0.4 s delay
 //   - a voice effect (pitch + voice size + age), instant, used until the AI voice is ready
+// "My voices" (id 'mine:<id>') are made from your own uploads and are always AI; until the engine is
+// ready your own voice plays.
 import { VOICES, voiceParams } from './voice-dsp.js';
 import { AiVoiceEngine } from './voice-ai.js';
 
@@ -11,6 +13,8 @@ export class VoiceStudio {
     this.ai = api && api.voiceEngineStart ? new AiVoiceEngine(api, { onInfo: (info) => this.aiInfo(info) }) : null;
     this.aiVoices = null; // installed AI voices: { 'young-man': { file, sr, f0 }, ... }
     this.aiWanted = true;
+    this.myVoices = {}; // prepared voices from your uploads: { <id>: { name, seconds, quality } }
+    this.myReady = false; // the models for them are installed
     this.aiState = 'off'; // off | loading | on | error
     this.aiError = '';
     this.aiNode = null;
@@ -34,6 +38,11 @@ export class VoiceStudio {
 
   get running() {
     return Boolean(this.ctx && this.stream);
+  }
+
+  // Your microphone as it is (for "use my natural voice"), or null until it's on.
+  get rawTrack() {
+    return this.stream ? this.stream.getAudioTracks()[0] || null : null;
   }
 
   // The track the calls receive: the changed voice, or silence until the microphone is on.
@@ -123,8 +132,20 @@ export class VoiceStudio {
   }
 
   get aiVoice() {
+    if (!this.ai) return null;
+    if (this.voice.startsWith('mine:')) {
+      const id = this.voice.slice(5);
+      return this.myReady && this.myVoices[id] ? { kind: 'mine', id } : null;
+    }
     const v = this.aiVoices && this.aiVoices[this.voice];
-    return this.ai && this.aiWanted && v ? v : null;
+    return this.aiWanted && v ? { kind: 'trained', ...v } : null;
+  }
+
+  setMyVoices(voices, ready) {
+    this.myVoices = voices || {};
+    this.myReady = Boolean(ready);
+    if (this.voice.startsWith('mine:') && !this.myVoices[this.voice.slice(5)]) this.voice = 'own';
+    this.apply();
   }
 
   // True while the AI voice is what people hear.
@@ -164,10 +185,11 @@ export class VoiceStudio {
   async useAi() {
     const v = this.aiVoice;
     if (!v || !this.running) return;
-    if (this.aiState === 'error' && this.aiFailed === v.file) return; // don't retry on its own
-    if (this.aiState === 'on' && this.ai.voiceFile === v.file) return;
+    const key = voiceKey(v);
+    if (this.aiState === 'error' && this.aiFailed === key) return; // don't retry on its own
+    if (this.aiState === 'on' && this.ai.voiceFile === key) return;
     const token = (this.aiToken = (this.aiToken || 0) + 1);
-    if (!this.ai.ready || this.ai.voiceFile !== v.file) {
+    if (!this.ai.ready || this.ai.voiceFile !== key) {
       this.aiState = 'loading';
       this.onState();
     }
@@ -182,7 +204,7 @@ export class VoiceStudio {
     } catch (err) {
       if (token !== this.aiToken) return;
       this.aiState = 'error';
-      this.aiFailed = v.file;
+      this.aiFailed = key;
       this.aiError = (err && err.message) || String(err);
     }
     this.route();
@@ -223,7 +245,7 @@ export class VoiceStudio {
   }
 
   setVoice(id) {
-    this.voice = VOICES[id] ? id : 'own';
+    this.voice = VOICES[id] || (typeof id === 'string' && id.startsWith('mine:') && this.myVoices[id.slice(5)]) ? id : 'own';
     this.apply();
   }
 
@@ -254,7 +276,7 @@ export class VoiceStudio {
     if (!this.ai) return '';
     if (!this.aiVoices) return 'none';
     if (!this.aiWanted) return 'disabled';
-    if (!this.aiVoice) return this.voice === 'own' ? 'idle' : 'missing';
+    if (!this.aiVoice) return this.voice === 'own' ? 'idle' : this.voice.startsWith('mine:') ? 'mine-missing' : 'missing';
     return this.aiState;
   }
 
@@ -267,6 +289,10 @@ export class VoiceStudio {
     for (const v of data) s += v * v;
     return Math.min(1, Math.sqrt(s / data.length) * 4);
   }
+}
+
+export function voiceKey(v) {
+  return v.kind === 'mine' ? `mine:${v.id}` : `trained:${v.file}`;
 }
 
 export { VOICES };

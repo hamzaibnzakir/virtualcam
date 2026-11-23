@@ -260,3 +260,59 @@ function rms(a, from = 0, to = a.length) {
 }
 
 module.exports = { Resampler, FFT, MelSpectrogram, melFilters, decodePitch, coarsePitch, median, rms };
+
+// Joins consecutive blocks of converted audio without clicks: finds where the new block best continues
+// the previous one's tail (SOLA) and crossfades over `cross` samples.
+class Joiner {
+  constructor(cross, search) {
+    this.cross = cross;
+    this.search = search;
+    this.tail = null;
+  }
+
+  reset() {
+    this.tail = null;
+  }
+
+  // Quiet block: fade the previous sound out, then silence.
+  silence(n) {
+    const out = new Float32Array(n);
+    if (this.tail) for (let i = 0; i < Math.min(n, this.cross); i += 1) out[i] = this.tail[i] * (1 - i / this.cross);
+    this.tail = null;
+    return out;
+  }
+
+  // audio must hold at least search + n + cross samples. Returns n samples.
+  join(audio, n, gain = 1) {
+    const { cross, search } = this;
+    if (audio.length < search + n + cross) return null;
+    let offset = 0;
+    if (this.tail) {
+      let best = -Infinity;
+      for (let o = 0; o <= search; o += 1) {
+        let num = 0;
+        let den = 1e-8;
+        for (let i = 0; i < cross; i += 1) {
+          num += audio[o + i] * this.tail[i];
+          den += audio[o + i] * audio[o + i];
+        }
+        const score = num / Math.sqrt(den);
+        if (score > best) {
+          best = score;
+          offset = o;
+        }
+      }
+    }
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i += 1) out[i] = audio[offset + i] * gain;
+    for (let i = 0; i < cross; i += 1) {
+      const w = Math.sin((0.5 * Math.PI * i) / cross) ** 2;
+      out[i] = this.tail ? out[i] * w + this.tail[i] * (1 - w) : out[i] * w;
+    }
+    this.tail = Float32Array.from(audio.subarray(offset + n, offset + n + cross), (v) => v * gain);
+    for (let i = 0; i < n; i += 1) out[i] = Math.max(-1, Math.min(1, out[i]));
+    return out;
+  }
+}
+
+module.exports.Joiner = Joiner;

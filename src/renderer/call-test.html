@@ -30,11 +30,17 @@ window.__testResult = { stage: 'starting' };
     const ctx = new AudioContext();
     const an = ctx.createAnalyser();
     ctx.createMediaStreamSource(new MediaStream([audio])).connect(an);
-    await new Promise((r) => setTimeout(r, 1500));
+    // The loudest moment over 4 s (the test microphone beeps, and AI voices arrive in blocks).
     const buf = new Float32Array(an.fftSize);
-    an.getFloatTimeDomainData(buf);
-    let rms = 0;
-    for (const s of buf) rms += s * s;
+    let best = 0;
+    for (let k = 0; k < 40; k += 1) {
+      await new Promise((r) => setTimeout(r, 100));
+      an.getFloatTimeDomainData(buf);
+      let sq = 0;
+      for (const s of buf) sq += s * s;
+      best = Math.max(best, sq);
+    }
+    const rms = best;
     window.__testResult = {
       stage: 'done',
       devices: devices.map((d) => `${d.kind}:${d.label}`),
