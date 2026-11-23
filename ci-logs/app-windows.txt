@@ -298,3 +298,5 @@ Console warnings: [
 SMOKE FAILED
 
 RESULT smoke=failure installer=skipped
+
+RESULT smoke=skipped installer=skipped
