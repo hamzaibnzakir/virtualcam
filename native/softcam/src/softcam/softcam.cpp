@@ -16,7 +16,7 @@ namespace {
 
 // Setup data
 
-const wchar_t FILTER_NAME[] = L"VirtualCam";
+const wchar_t FILTER_NAME[] = L"Brainbox VirtualCam";
 const GUID &FILTER_CLASSID = CLSID_DShowSoftcam;
 
 const AMOVIESETUP_MEDIATYPE s_pin_types[] =

@@ -23,7 +23,7 @@ function Pass($text) { Log "PASS: $text" }
 function Capture-Centre($name) {
   $raw = Join-Path $env:TEMP "$name.raw"
   Remove-Item $raw -ErrorAction SilentlyContinue
-  $out = & ffmpeg -hide_banner -loglevel error -f dshow -i 'video=VirtualCam' -frames:v 1 -pix_fmt rgb24 -s "${width}x${height}" -f rawvideo -y $raw 2>&1
+  $out = & ffmpeg -hide_banner -loglevel error -f dshow -i 'video=Brainbox VirtualCam' -frames:v 1 -pix_fmt rgb24 -s "${width}x${height}" -f rawvideo -y $raw 2>&1
   if ($out) { Log "ffmpeg: $out" }
   if (-not (Test-Path $raw)) { return $null }
   $bytes = [System.IO.File]::ReadAllBytes($raw)
@@ -58,7 +58,7 @@ if (Test-Path "Registry::HKEY_CLASSES_ROOT\WOW6432Node\CLSID\$clsid\InprocServer
 
 # --- 2. listed as a camera ---
 $list = (& ffmpeg -hide_banner -list_devices true -f dshow -i dummy 2>&1) -join "`n"
-if ($list -match '"VirtualCam"') { Pass "ffmpeg lists the VirtualCam camera" } else { Fail "VirtualCam not in DirectShow device list"; Log $list }
+if ($list -match '"Brainbox VirtualCam"') { Pass "ffmpeg lists the Brainbox VirtualCam camera" } else { Fail "Brainbox VirtualCam not in DirectShow device list"; Log $list }
 
 # --- 3. test-pattern mode ---
 $bridge = Start-Process -FilePath "$Bin\x64\vcam-bridge.exe" -ArgumentList "$width $height --test-pattern 30 200 10 20" -PassThru -NoNewWindow -RedirectStandardOutput "$env:TEMP\bridge1.txt"
@@ -95,9 +95,9 @@ $bridge = Start-Process -FilePath "$Bin\x64\vcam-bridge.exe" -ArgumentList "720 
 Start-Sleep -Seconds 2
 $raw = Join-Path $env:TEMP 'portrait.raw'
 Remove-Item $raw -ErrorAction SilentlyContinue
-$out = & ffmpeg -hide_banner -loglevel error -f dshow -i 'video=VirtualCam' -frames:v 1 -pix_fmt rgb24 -f rawvideo -y $raw 2>&1
+$out = & ffmpeg -hide_banner -loglevel error -f dshow -i 'video=Brainbox VirtualCam' -frames:v 1 -pix_fmt rgb24 -f rawvideo -y $raw 2>&1
 if ($out) { Log "ffmpeg: $out" }
-$info = (& ffmpeg -hide_banner -f dshow -i 'video=VirtualCam' -frames:v 1 -f null - 2>&1) -join ' '
+$info = (& ffmpeg -hide_banner -f dshow -i 'video=Brainbox VirtualCam' -frames:v 1 -f null - 2>&1) -join ' '
 if ($info -match '(\d{3,4})x(\d{3,4})') { Log "portrait stream size reported: $($Matches[0])" }
 if (Test-Path $raw) {
   $bytes = [System.IO.File]::ReadAllBytes($raw)
