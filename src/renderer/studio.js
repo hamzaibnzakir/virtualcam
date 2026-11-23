@@ -530,6 +530,10 @@ async function refreshModels() {
   }
   local.swapFile = state && state.settings.localModel === 'fast' && models.fast ? models.fastFile : null;
   renderLocal();
+  if (state) {
+    applyAiVoices();
+    renderVoice();
+  }
 }
 
 async function startDownload(pack) {
@@ -539,14 +543,16 @@ async function startDownload(pack) {
   }
   download = { pack, done: 0, total: 1, file: 'models' };
   renderLocal();
+  renderVoice();
   try {
     models = await api.modelsDownload(pack);
-    showToast({ core: 'Local AI models downloaded', boost: 'Face detail boost downloaded', fast: 'Fast model downloaded' }[pack]);
+    showToast({ core: 'Local AI models downloaded', boost: 'Face detail boost downloaded', fast: 'Fast model downloaded', voices: 'AI voices downloaded' }[pack]);
   } catch (err) {
     showToast((err && err.message) || 'Download failed', true);
   } finally {
     download = null;
     await refreshModels();
+    renderVoice();
     applyScene();
   }
 }
@@ -816,7 +822,7 @@ function handlePromptAction(id) {
 
 // ---------- voice & calls ----------
 
-const voice = new VoiceStudio({ onState: () => renderVoice() });
+const voice = new VoiceStudio({ api, onState: () => renderVoice() });
 let callVideoTrack = null;
 const calls = new CallLink({
   api,
@@ -855,12 +861,14 @@ function renderVoice() {
   grid.querySelectorAll('button').forEach((b) => setPressed(b, b.dataset.voice === state.settings.voice));
   $('btn-voice-mic').textContent = voice.running ? 'Turn off microphone' : 'Turn on microphone';
   const pitch = voice.speakerF0 ? ` Your speaking pitch: ${Math.round(voice.speakerF0)} Hz.` : '';
+  const kind = state.settings.voice === 'own' ? '' : voice.aiLive ? ' (AI voice)' : ' (voice effect)';
   $('voice-line').textContent = voice.error
     ? `Microphone problem: ${voice.error}`
     : voice.running
-      ? `Live: ${VOICES[state.settings.voice].label}.${pitch}${voice.speakerF0 ? '' : ' Say a sentence so the voice can tune itself to you.'}`
+      ? `Live: ${VOICES[state.settings.voice].label}${kind}.${pitch}${voice.speakerF0 ? '' : ' Say a sentence so the voice can tune itself to you.'}`
       : 'Pick a voice, then turn on the microphone to try it.';
   setPressed($('toggle-monitor'), voice.monitor);
+  renderAiVoice();
   const connected = calls.connected;
   $('call-status').textContent = connected
     ? `Call window is getting your picture and ${VOICES[state.settings.voice].label.toLowerCase()}`
@@ -868,6 +876,77 @@ function renderVoice() {
       ? 'Call window open. Start or join a call there.'
       : 'No call window open';
   $('call-status').className = `ai-status${connected ? ' on' : ''}`;
+}
+
+// The AI voices block: download, on/off, and what the engine is doing.
+function renderAiVoice() {
+  const installed = Boolean(models.voices);
+  const downloading = download && download.pack === 'voices';
+  const btn = $('btn-voice-ai');
+  const status = $('voice-ai-status');
+  const line = $('voice-ai-line');
+  setPressed($('toggle-ai-voices'), installed && state.settings.aiVoices);
+  $('toggle-ai-voices').disabled = !installed;
+  btn.hidden = false;
+  if (downloading) {
+    const pct = Math.round((download.done / Math.max(1, download.total)) * 100);
+    status.textContent = `Downloading AI voices… ${pct}%`;
+    status.className = 'ai-status';
+    line.textContent = `${download.file} · ${(download.done / 1e6).toFixed(0)} of ${(download.total / 1e6).toFixed(0)} MB`;
+    btn.textContent = 'Cancel';
+    return;
+  }
+  if (!installed) {
+    status.textContent = 'AI voices not downloaded';
+    status.className = 'ai-status';
+    line.textContent = 'Until then each voice is a voice effect: instant, but less natural.';
+    btn.textContent = 'Download AI voices';
+    return;
+  }
+  btn.hidden = voice.aiSummary() !== 'error';
+  btn.textContent = 'Try the AI voice again';
+  const name = VOICES[state.settings.voice].label.toLowerCase();
+  const summary = voice.aiSummary();
+  const where = voice.ai && voice.ai.loaded ? ` on ${voice.ai.loaded.device}` : '';
+  const text = {
+    disabled: ['AI voices off: using voice effects', ''],
+    idle: ['AI voices ready', 'Pick a voice above to use it.'],
+    missing: ['This voice has no AI version yet', 'It plays as a voice effect.'],
+    off: ['AI voices ready', voice.running ? '' : 'Turn on the microphone to hear it.'],
+    loading: [`Starting the AI ${name}…`, 'The voice effect plays until it is ready (a few seconds).'],
+    on: [`AI ${name} live${where}`, 'About half a second behind you, like a phone call.'],
+    error: ['The AI voice could not start', `${voice.aiError} The voice effect plays instead.`],
+  }[summary] || ['', ''];
+  status.textContent = text[0];
+  status.className = `ai-status${summary === 'on' ? ' on' : summary === 'error' ? ' err' : summary === 'loading' ? ' warn' : ''}`;
+  line.textContent = text[1];
+}
+
+// AI voices need a one-time agreement on how they may be used.
+function askVoiceConsent() {
+  if (state.settings.voiceConsent) return Promise.resolve(true);
+  const dlg = $('voice-consent');
+  return new Promise((resolve) => {
+    dlg.addEventListener(
+      'close',
+      () => {
+        const yes = dlg.returnValue === 'yes';
+        if (yes) {
+          state.settings.voiceConsent = true;
+          changed();
+        }
+        resolve(yes);
+      },
+      { once: true },
+    );
+    dlg.returnValue = '';
+    dlg.showModal();
+  });
+}
+
+function applyAiVoices() {
+  voice.gpuCount = local.gpuCount || 0;
+  voice.setAiVoices(models.voices, state.settings.aiVoices && state.settings.voiceConsent);
 }
 
 async function fillMics() {
@@ -1122,6 +1201,27 @@ function bindEvents() {
     voice.setMonitor(!voice.monitor);
     renderVoice();
   });
+  $('btn-voice-ai').addEventListener('click', async () => {
+    if (models.voices) {
+      voice.retryAi();
+      return;
+    }
+    if (download && download.pack !== 'voices') {
+      showToast('Another download is running. Try again when it finishes.', true);
+      return;
+    }
+    if (!download && !(await askVoiceConsent())) return;
+    await startDownload('voices');
+  });
+  $('toggle-ai-voices').addEventListener('click', async () => {
+    if (!models.voices) return;
+    const on = !(state.settings.aiVoices && state.settings.voiceConsent);
+    if (on && !(await askVoiceConsent())) return;
+    state.settings.aiVoices = on;
+    changed();
+    applyAiVoices();
+    renderVoice();
+  });
   document.querySelectorAll('#call-sites [data-site]').forEach((b) => b.addEventListener('click', () => openCallSite(b.dataset.site)));
   $('btn-call-url').addEventListener('click', () => openCallSite($('call-url').value.trim()));
   api.onCallClosed(() => {
@@ -1324,7 +1424,8 @@ async function start() {
   api.onModelsProgress((p) => {
     if (download && p.pack === download.pack) {
       download = { ...download, ...p };
-      renderLocal();
+      if (p.pack === 'voices') renderVoice();
+      else renderLocal();
     }
   });
   api.onCameraState((next) => {
@@ -1538,6 +1639,25 @@ async function runSmokeTest() {
         lookStep.saved = await api.smokeSave(api.smokeFiles.lookOut, new Uint8Array(await png.arrayBuffer()));
       }
       report.steps.push(lookStep);
+
+      // AI voice: with the stand-in voice models installed, the microphone must go through the voice
+      // engine process and come back (the stand-in voice hums at 200 Hz).
+      if (api.smokeFiles.voices) {
+        state.settings.voiceConsent = true;
+        state.settings.aiVoices = true;
+        state.settings.voice = 'young-woman';
+        await refreshModels();
+        voice.setVoice('young-woman');
+        if (!voice.running) await voice.start();
+        const aiUntil = Date.now() + 90000;
+        while (Date.now() < aiUntil && !voice.aiLive && voice.aiSummary() !== 'error') await wait(250);
+        await wait(3000);
+        const aiStats = voice.ai ? await voice.ai.stats() : null;
+        const aiStep = { step: 'ai-voice', installed: Boolean(models.voices), state: voice.aiSummary(), error: voice.aiError, live: voice.aiLive, loaded: voice.ai && voice.ai.loaded, stats: aiStats, playback: voice.aiBuffer || null };
+        aiStep.ok = aiStep.live && Boolean(aiStats && aiStats.steps > 0);
+        report.steps.push(aiStep);
+        if (!aiStep.ok) failures.push('the AI voice engine did not convert the microphone');
+      }
 
       // Calls window: a test page asks for a camera and microphone like a call app; it must get the
       // studio's picture and the (changed) voice.

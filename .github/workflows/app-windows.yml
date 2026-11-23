@@ -62,6 +62,7 @@ jobs:
           VCAM_SMOKE_FACE: ${{ github.workspace }}\testdata\frame.png
           VCAM_SMOKE_REF: ${{ github.workspace }}\testdata\faces\SFHQ_pt3_00000010.jpg
           VCAM_SMOKE_SHOT: ${{ github.workspace }}\ci-logs\app-windows.png
+          VCAM_SMOKE_VOICE_DIR: ${{ github.workspace }}\testdata\voice
         run: npm run smoke 2>&1 | Tee-Object -FilePath ci-logs\app-windows.txt
 
       - name: Build the Windows installer

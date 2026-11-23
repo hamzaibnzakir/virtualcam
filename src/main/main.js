@@ -76,6 +76,7 @@ let sceneSnapshot = { scenes: [], activeId: null };
 const hotkeyFailures = [];
 const smokeLog = [];
 let faceWorker = null;
+let voiceWorker = null;
 let hardwareCache = null;
 let downloader = null;
 let camera = null;
@@ -652,6 +653,41 @@ function registerIpc() {
     return { ok: true, modelsDir: modelsDir() };
   });
 
+  // ---------- AI voice engine ----------
+  // Its own process (so voice and face work never hold each other up). Two ports go to the studio:
+  // one for control messages and one the audio worklet uses directly, so audio never waits on the page.
+  ipcMain.handle('voiceengine:start', () => {
+    if (!mainWindow) return { ok: false };
+    if (!voiceWorker) {
+      const logFile = engineLogFile();
+      voiceWorker = utilityProcess.fork(path.join(__dirname, 'voice', 'worker.js'), [], {
+        serviceName: 'Brainbox VirtualCam Voice Engine',
+        stdio: 'pipe',
+        env: { ...process.env, VCAM_ENGINE_LOG: logFile },
+      });
+      const worker = voiceWorker;
+      const append = (chunk) => fs.promises.appendFile(logFile, chunk).catch(() => {});
+      if (worker.stdout) worker.stdout.on('data', append);
+      if (worker.stderr) worker.stderr.on('data', append);
+      worker.on('exit', (code) => {
+        append(`[${new Date().toISOString()}] voice engine exited with code ${code}\n`);
+        if (voiceWorker === worker) voiceWorker = null;
+        sendToStudio('voiceengine:exit', { code });
+      });
+    }
+    const control = new MessageChannelMain();
+    const audio = new MessageChannelMain();
+    voiceWorker.postMessage({ type: 'ports' }, [control.port1, audio.port1]);
+    mainWindow.webContents.postMessage('voiceengine:ports', null, [control.port2, audio.port2]);
+    return { ok: true, modelsDir: modelsDir() };
+  });
+
+  ipcMain.handle('voiceengine:stop', () => {
+    if (voiceWorker) voiceWorker.kill();
+    voiceWorker = null;
+    return true;
+  });
+
   ipcMain.handle('faceengine:log', () => {
     const file = engineLogFile();
     if (fs.existsSync(file)) shell.showItemInFolder(file);
@@ -678,7 +714,7 @@ function registerIpc() {
   ipcMain.handle('models:status', () => ({ ...modelStatus(modelsDir()), busy: Boolean(downloader && downloader.busy) }));
 
   ipcMain.handle('models:download', async (_e, pack) => {
-    if (pack !== 'core' && pack !== 'boost' && pack !== 'fast') throw new Error('Unknown model pack');
+    if (pack !== 'core' && pack !== 'boost' && pack !== 'fast' && pack !== 'voices') throw new Error('Unknown model pack');
     if (!downloader) downloader = new Downloader(modelsDir());
     let lastSent = 0;
     return downloader.download(pack, (p) => {
@@ -735,7 +771,26 @@ app.on('second-instance', () => {
   mainWindow.focus();
 });
 
+// Self-test: install the tiny stand-in voice models (testdata/voice) as if the AI voices were
+// downloaded, so the whole AI voice path can be checked without the real models.
+function installSmokeVoices() {
+  const src = process.env.VCAM_SMOKE_VOICE_DIR;
+  if (!SMOKE || !src) return;
+  const crypto = require('node:crypto');
+  const dir = modelsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const files = ['contentvec.onnx', 'rmvpe.onnx', 'voice-test.onnx'].map((file) => {
+    const data = fs.readFileSync(path.join(src, file));
+    fs.writeFileSync(path.join(dir, file), data);
+    return { file, label: file, url: `https://github.com/smoke/${file}`, sha256: crypto.createHash('sha256').update(data).digest('hex'), bytes: data.length };
+  });
+  const voice = { file: 'voice-test.onnx', sr: 40000, f0: 200 };
+  const manifest = { version: 0, files, voices: { 'young-man': voice, 'young-woman': voice, 'older-man': voice, 'older-woman': voice } };
+  fs.writeFileSync(path.join(dir, 'voice-models.json'), JSON.stringify(manifest));
+}
+
 app.whenReady().then(() => {
+  installSmokeVoices();
   const ses = session.defaultSession;
 
   ses.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -799,6 +854,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (camera) camera.stop();
   if (faceWorker) faceWorker.kill();
+  if (voiceWorker) voiceWorker.kill();
   if (downloader) downloader.cancel();
 });
 

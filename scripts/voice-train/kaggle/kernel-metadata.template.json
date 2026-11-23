@@ -1,0 +1,14 @@
+{
+  "id": "KAGGLE_USERNAME/brainbox-voices-RUN",
+  "title": "brainbox-voices-RUN",
+  "code_file": "kaggle_voices.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": ["KAGGLE_USERNAME/brainbox-voice-kit"],
+  "kernel_sources": [],
+  "competition_sources": []
+}

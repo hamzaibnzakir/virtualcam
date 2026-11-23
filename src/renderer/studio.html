@@ -111,7 +111,15 @@
           <span id="monitor-label">Hear myself <span class="muted small">(use headphones)</span></span>
           <button type="button" class="switch" id="toggle-monitor" aria-labelledby="monitor-label"><span></span></button>
         </div>
-        <div class="muted small">These voices are voice effects for now. Trained AI voices replace them when they're ready.</div>
+        <div class="ai-voice-box">
+          <div class="toggle-row">
+            <span id="ai-voices-label">AI voices <span class="muted small">(trained, more natural)</span></span>
+            <button type="button" class="switch" id="toggle-ai-voices" aria-labelledby="ai-voices-label"><span></span></button>
+          </div>
+          <div class="ai-status" id="voice-ai-status" role="status">AI voices not downloaded</div>
+          <div class="muted small" id="voice-ai-line">Until then each voice is a voice effect: instant, but less natural.</div>
+          <button type="button" class="btn btn-small" id="btn-voice-ai">Download AI voices</button>
+        </div>
       </section>
 
       <section class="panel" data-tab="voice" hidden>
@@ -332,6 +340,22 @@
     <div class="dialog-actions">
       <button type="button" class="btn" id="btn-settings-cancel">Cancel</button>
       <button type="submit" class="btn btn-accent" id="btn-settings-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="voice-consent" aria-labelledby="voice-consent-h">
+  <form method="dialog" class="dialog-body">
+    <h2 id="voice-consent-h">Before you use AI voices</h2>
+    <p class="small">The four AI voices were trained only on computer-made speech. They don't belong to, and aren't copies of, any real person.</p>
+    <ul class="steps small">
+      <li>Use them for fun, privacy, characters and your own content.</li>
+      <li>Don't use them to pretend to be a real person, to trick someone, or to get past voice checks (banks, ID or "is this really you" calls).</li>
+      <li>In calls, tell people when it matters that they're hearing a changed voice.</li>
+    </ul>
+    <div class="dialog-actions">
+      <button type="submit" class="btn" value="no">Not now</button>
+      <button type="submit" class="btn btn-accent" value="yes" id="btn-voice-consent">I agree</button>
     </div>
   </form>
 </dialog>

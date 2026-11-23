@@ -87,6 +87,8 @@ function defaultSettings() {
     askOnCameraUse: true,
     voice: 'own',
     micId: '',
+    aiVoices: true,
+    voiceConsent: false,
   };
 }
 
@@ -164,6 +166,8 @@ export function normalizeState(raw) {
       askOnCameraUse: rawSettings.askOnCameraUse !== false,
       voice: ['own', 'young-man', 'young-woman', 'older-man', 'older-woman'].includes(rawSettings.voice) ? rawSettings.voice : 'own',
       micId: typeof rawSettings.micId === 'string' ? rawSettings.micId.slice(0, 200) : '',
+      aiVoices: rawSettings.aiVoices !== false,
+      voiceConsent: rawSettings.voiceConsent === true,
     },
   };
 }

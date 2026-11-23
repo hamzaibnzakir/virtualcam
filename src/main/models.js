@@ -87,6 +87,59 @@ async function fetchFastManifest(fetchImpl = fetch) {
   }
 }
 
+// The AI voices (trained for this app from computer-made speech) and the two shared speech models
+// they need are published the same way, under one manifest:
+//   { version, files: [{ file, label, url, sha256, bytes }], voices: { 'young-man': { file, sr, f0 } } }
+const VOICE_MANIFEST_URL =
+  'https://github.com/hamzaibnzakir/brainbox-virtualcam-releases/releases/download/models-voice/voice-models.json';
+const VOICE_LOCAL = 'voice-models.json';
+const VOICE_IDS = ['young-man', 'young-woman', 'older-man', 'older-woman'];
+
+function validVoiceFile(m) {
+  return (
+    m &&
+    typeof m.file === 'string' &&
+    /^[\w.-]+\.onnx$/.test(m.file) &&
+    typeof m.url === 'string' &&
+    /^https:\/\/(github\.com|huggingface\.co|objects\.githubusercontent\.com)\//.test(m.url) &&
+    /^[0-9a-f]{64}$/.test(m.sha256) &&
+    Number.isInteger(m.bytes) &&
+    m.bytes > 0 &&
+    m.bytes < 5e8
+  );
+}
+
+function validVoiceManifest(m) {
+  if (!m || !Array.isArray(m.files) || !m.files.every(validVoiceFile) || !m.voices || typeof m.voices !== 'object') return null;
+  const names = new Set(m.files.map((f) => f.file));
+  if (!names.has('contentvec.onnx') || !names.has('rmvpe.onnx')) return null;
+  const voices = {};
+  for (const id of VOICE_IDS) {
+    const v = m.voices[id];
+    if (v && names.has(v.file) && Number(v.sr) >= 16000 && Number(v.f0) >= 0) voices[id] = { file: v.file, sr: Number(v.sr), f0: Number(v.f0) };
+  }
+  if (!Object.keys(voices).length) return null;
+  return { version: m.version || 1, files: m.files, voices };
+}
+
+function voiceLocal(modelsDir) {
+  try {
+    return validVoiceManifest(JSON.parse(fs.readFileSync(path.join(modelsDir, VOICE_LOCAL), 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+async function fetchVoiceManifest(fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(VOICE_MANIFEST_URL, { redirect: 'follow' });
+    if (!res.ok) return null;
+    return validVoiceManifest(await res.json());
+  } catch {
+    return null;
+  }
+}
+
 function packFiles(pack, extra = []) {
   return [...MODELS, ...extra].filter((m) => m.pack === pack);
 }
@@ -105,11 +158,15 @@ function status(modelsDir) {
     }
   };
   const fast = fastLocal(modelsDir);
+  const voice = voiceLocal(modelsDir);
+  const voiceFilesOk = Boolean(voice && voice.files.every(present));
   return {
     core: packFiles('core').every(present),
     boost: packFiles('boost').every(present),
     fast: Boolean(fast && present(fast)),
     fastFile: fast && present(fast) ? fast.file : null,
+    voices: voiceFilesOk ? voice.voices : null,
+    voicesVersion: voiceFilesOk ? voice.version : null,
     coreBytes: packBytes('core'),
     boostBytes: packBytes('boost'),
   };
@@ -138,6 +195,12 @@ class Downloader {
       if (!fast) throw new Error("The fast model isn't published yet. Keep using Best for now.");
       extra = [fast];
     }
+    let voicePack = null;
+    if (pack === 'voices') {
+      voicePack = await fetchVoiceManifest(fetchImpl);
+      if (!voicePack) throw new Error("The AI voices aren't published yet. The voice effects work in the meantime.");
+      extra = voicePack.files.map((f) => ({ ...f, label: f.label || 'AI voice', pack: 'voices' }));
+    }
     const files = packFiles(pack, extra);
     if (!files.length) throw new Error(`Unknown model pack ${pack}`);
     fs.mkdirSync(this.modelsDir, { recursive: true });
@@ -160,6 +223,9 @@ class Downloader {
       }
     } finally {
       this.controller = null;
+    }
+    if (pack === 'voices') {
+      fs.writeFileSync(path.join(this.modelsDir, VOICE_LOCAL), JSON.stringify(voicePack));
     }
     if (pack === 'fast') {
       const { file, url, sha256, bytes, version } = extra[0];
@@ -200,4 +266,4 @@ class Downloader {
   }
 }
 
-module.exports = { MODELS, Downloader, status, packBytes, fetchFastManifest, FAST_MANIFEST_URL };
+module.exports = { MODELS, Downloader, status, packBytes, fetchFastManifest, FAST_MANIFEST_URL, fetchVoiceManifest, validVoiceManifest, VOICE_MANIFEST_URL, VOICE_IDS };

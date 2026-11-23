@@ -47,7 +47,7 @@ cpSync(join(root, 'assets/brand/icon.png'), join(out, 'brand', 'icon.png'));
 
 // The voice changer runs as an AudioWorklet module (its own file, ES module format).
 await build({
-  entryPoints: { 'voice-worklet': join(root, 'src/renderer/voice-worklet.js') },
+  entryPoints: { 'voice-worklet': join(root, 'src/renderer/voice-worklet.js'), 'voice-ai-worklet': join(root, 'src/renderer/voice-ai-worklet.js') },
   bundle: true,
   format: 'esm',
   platform: 'browser',

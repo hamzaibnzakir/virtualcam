@@ -18,6 +18,12 @@ ipcRenderer.on('faceengine:port', (event) => {
   enginePort.start();
 });
 
+// The AI voice engine's two ports go straight to the page (MessagePorts can't cross the bridge any
+// other way). The page picks them up with window 'message' events of type 'brainbox-voice-ports'.
+ipcRenderer.on('voiceengine:ports', (event) => {
+  window.postMessage({ type: 'brainbox-voice-ports' }, '*', event.ports);
+});
+
 contextBridge.exposeInMainWorld('vcam', {
   platform: process.platform,
   smoke: process.env.VCAM_SMOKE === '1',
@@ -31,6 +37,7 @@ contextBridge.exposeInMainWorld('vcam', {
           liteOut: process.env.VCAM_SMOKE_LITE_OUT || '',
           localOut: process.env.VCAM_SMOKE_LOCAL_OUT || '',
           lookOut: process.env.VCAM_SMOKE_LOOK_OUT || '',
+          voices: Boolean(process.env.VCAM_SMOKE_VOICE_DIR),
         }
       : null,
 
@@ -71,6 +78,9 @@ contextBridge.exposeInMainWorld('vcam', {
   },
   onEngineExit: (handler) => listen('faceengine:exit', handler),
   showEngineLog: () => ipcRenderer.invoke('faceengine:log'),
+  voiceEngineStart: () => ipcRenderer.invoke('voiceengine:start'),
+  voiceEngineStop: () => ipcRenderer.invoke('voiceengine:stop'),
+  onVoiceEngineExit: (handler) => listen('voiceengine:exit', handler),
 
   // App preferences, the corner question card, camera use by other apps, updates.
   applyPrefs: (prefs) => ipcRenderer.invoke('prefs:apply', prefs),
