@@ -1,25 +1,25 @@
-VirtualCam Windows camera test - 2026-11-22 07:37:32
-[07:37:32] Windows: Microsoft Windows Server 2025 Datacenter build 26100
-[07:37:32] deps of softcam.dll (x64): Dump of file D:\a\virtualcam\virtualcam\out\x64\softcam.dll, KERNEL32.dll, ole32.dll, WINMM.dll, ADVAPI32.dll
-[07:37:32] PASS: softcam.dll runs without extra runtimes
-[07:37:32] deps of vcam-bridge.exe (x64): KERNEL32.dll
-[07:37:32] PASS: vcam-bridge.exe runs without extra runtimes
-[07:37:32] deps of softcam.dll (x86): Dump of file D:\a\virtualcam\virtualcam\out\x86\softcam.dll, KERNEL32.dll, ole32.dll, WINMM.dll, ADVAPI32.dll
-[07:37:32] PASS: softcam.dll runs without extra runtimes
-[07:37:32] PASS: 64-bit camera registered
-[07:37:33] PASS: 32-bit camera registered
-[07:37:33] PASS: 64-bit class registered
-[07:37:33] PASS: 32-bit class registered
-[07:37:33] PASS: ffmpeg lists the VirtualCam camera
-[07:37:35] pattern frame centre: 30,200,10
-[07:37:35] PASS: camera shows the test colour (30,200,10)
-[07:37:36] bridge said: ready | connected
-[07:37:39] stdin frame centre: 200,30,10
-[07:37:39] PASS: frames piped from the app reach the camera (200,30,10)
-[07:37:54] bridge said: ready | connected | disconnected
-[07:37:56] portrait stream size reported: 720x1280
-[07:37:56] portrait frame bytes: 2764800 (expected 2764800)
-[07:37:56] portrait frame centre: 220,40,160
-[07:37:56] PASS: portrait camera delivers 720x1280 frames
-[07:37:58] PASS: 64-bit camera unregistered
-[07:37:58] ALL TESTS PASSED
+VirtualCam Windows camera test - 2026-11-23 01:34:03
+[01:34:03] Windows: Microsoft Windows Server 2025 Datacenter build 26100
+[01:34:03] deps of softcam.dll (x64): Dump of file D:\a\virtualcam\virtualcam\out\x64\softcam.dll, KERNEL32.dll, ole32.dll, WINMM.dll, ADVAPI32.dll
+[01:34:03] PASS: softcam.dll runs without extra runtimes
+[01:34:03] deps of vcam-bridge.exe (x64): KERNEL32.dll
+[01:34:03] PASS: vcam-bridge.exe runs without extra runtimes
+[01:34:03] deps of softcam.dll (x86): Dump of file D:\a\virtualcam\virtualcam\out\x86\softcam.dll, KERNEL32.dll, ole32.dll, WINMM.dll, ADVAPI32.dll
+[01:34:03] PASS: softcam.dll runs without extra runtimes
+[01:34:04] PASS: 64-bit camera registered
+[01:34:04] PASS: 32-bit camera registered
+[01:34:04] PASS: 64-bit class registered
+[01:34:04] PASS: 32-bit class registered
+[01:34:04] PASS: ffmpeg lists the Brainbox VirtualCam camera
+[01:34:06] pattern frame centre: 30,200,10
+[01:34:06] PASS: camera shows the test colour (30,200,10)
+[01:34:07] bridge said: ready | connected
+[01:34:11] stdin frame centre: 200,30,10
+[01:34:11] PASS: frames piped from the app reach the camera (200,30,10)
+[01:34:25] bridge said: ready | connected | disconnected
+[01:34:27] portrait stream size reported: 720x1280
+[01:34:27] portrait frame bytes: 2764800 (expected 2764800)
+[01:34:28] portrait frame centre: 220,40,160
+[01:34:28] PASS: portrait camera delivers 720x1280 frames
+[01:34:29] PASS: 64-bit camera unregistered
+[01:34:29] ALL TESTS PASSED
