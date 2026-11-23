@@ -87,6 +87,6 @@ jobs:
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
             git commit -m "App on Windows CI: smoke ${{ steps.smoke.outcome }}, installer ${{ steps.dist.outcome }} [skip ci]"
-            git pull --rebase
+            git pull --rebase -X theirs  # on a clash, this run's logs win
             git push
           }
