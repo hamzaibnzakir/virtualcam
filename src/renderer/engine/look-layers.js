@@ -14,9 +14,10 @@ const BACKGROUND = 0;
 const HAIR = 1;
 const CLOTHES = 4;
 const SEG_SIZE = 256;
-const HAIR_GRID = 256; // width of the grid your own hair is painted over on
+const HAIR_GRID = 320; // same as SEG_INPUT: the hair fill reuses the segmenter's copy of the picture
+const SEG_INPUT = 320; // width of the camera copy the segmenter gets // width of the grid your own hair is painted over on
 const PHOTO_MAX = 1024;
-const CAMERA_SEG_EVERY_MS = 100; // how often your clothes are found again
+const CAMERA_SEG_EVERY_MS = 150; // how often your clothes (and hair) are found again
 const BOX_EASE = 0.35; // smoothing of the outfit's placement between finds
 
 function smoothstep(lo, hi, v) {
@@ -120,6 +121,32 @@ function eyeLine(points) {
   return points ? (points[33 * 2 + 1] + points[263 * 2 + 1]) / 2 : null;
 }
 
+// Where your hair can be: a box around your face, wide enough for big hair and long enough for hair
+// down to your chest (in picture pixels).
+function headArea(points) {
+  if (!points) return null;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i < points.length; i += 2) {
+    x0 = Math.min(x0, points[i]);
+    x1 = Math.max(x1, points[i]);
+    y0 = Math.min(y0, points[i + 1]);
+    y1 = Math.max(y1, points[i + 1]);
+  }
+  const w = x1 - x0;
+  const h = y1 - y0;
+  return {
+    x0: x0 - w * 1.2,
+    x1: x1 + w * 1.2,
+    y0: y0 - h * 1.2,
+    y1: y1 + h * 2.2,
+    // Hair starts at the top and sides of your face.
+    seed: { x0: x0 - w * 0.3, x1: x1 + w * 0.3, y0: y0 - h * 0.6, y1: y0 + h * 0.6 },
+  };
+}
+
 // Grows a 0/1 mask by r cells.
 function dilate(mask, w, h, r) {
   const tmp = new Uint8Array(w * h);
@@ -160,10 +187,15 @@ export class LookLayers {
     this.lastSegAt = -Infinity;
     this.layer = document.createElement('canvas');
     this.layerCtx = this.layer.getContext('2d');
+    this.segInput = document.createElement('canvas'); // small copy of the camera picture to segment
+    // Kept on the processor: its pixels are read for the hair fill (reading a graphics-chip canvas stalls).
+    this.segInputCtx = this.segInput.getContext('2d', { willReadFrequently: true });
     this.small = document.createElement('canvas'); // the camera picture at mask size
     this.smallCtx = this.small.getContext('2d', { willReadFrequently: true });
     this.hairFill = document.createElement('canvas'); // background painted where your hair is
     this.hairFillCtx = this.hairFill.getContext('2d');
+    this.hairSoft = document.createElement('canvas'); // the same, softened once per update (not per frame)
+    this.hairSoftCtx = this.hairSoft.getContext('2d');
     this.hairFillOn = false;
     this.plate = null; // remembered background colours (r, g, b per mask cell)
     this.seen = null;
@@ -214,10 +246,13 @@ export class LookLayers {
         outputCategoryMask: false,
       });
     await this.segModel();
+    // On the processor: it runs a few times a second on a small picture, and its masks are then
+    // already in memory. On the graphics chip, reading them back made the whole frame wait for the
+    // face tracker's work to finish.
     try {
-      this.videoSeg = await make('GPU');
-    } catch {
       this.videoSeg = await make('CPU');
+    } catch {
+      this.videoSeg = await make('GPU');
     }
   }
 
@@ -324,26 +359,50 @@ export class LookLayers {
 
   // Finds your clothes (and your hair, when it should be hidden) in the camera picture, a few times a
   // second.
-  findCameraClothes(frame, width, height, t, chinY = null, { clothes = true, hair = false, eyeY = null } = {}) {
+  findCameraClothes(frame, width, height, t, chinY = null, { clothes = true, hair = false, eyeY = null, head = null } = {}) {
     // Every CAMERA_SEG_EVERY_MS, or less often when finding takes long (no graphics chip), so it
     // never takes more than about a fifth of the time.
     if (!this.videoSeg || t - this.lastSegAt < Math.max(CAMERA_SEG_EVERY_MS, (this.segMs || 0) * 5)) return;
     this.lastSegAt = t;
     const segStart = performance.now();
+    try {
+      this.segmentCamera(frame, width, height, chinY, { clothes, hair, eyeY, head });
+    } finally {
+      // All of it (finding, reading the result back, the maths), so the pacing above is honest.
+      this.segMs = performance.now() - segStart;
+    }
+  }
+
+  segmentCamera(frame, width, height, chinY, { clothes, hair, eyeY, head }) {
+    // The model looks at 256 px anyway: give it a small copy, so its masks are small too (reading
+    // full-size masks back from the graphics chip was the slow part).
+    const sw = Math.min(width, SEG_INPUT);
+    const sh = Math.max(1, Math.round((height * sw) / width));
+    if (this.segInput.width !== sw || this.segInput.height !== sh) {
+      this.segInput.width = sw;
+      this.segInput.height = sh;
+    }
+    this.segInputCtx.drawImage(frame, 0, 0, sw, sh);
     let res;
     this.camRuns = (this.camRuns || 0) + 1;
+    const s0 = performance.now();
     try {
-      res = this.videoSeg.segmentForVideo(frame, Math.floor(t));
+      res = this.videoSeg.segmentForVideo(this.segInput, Math.floor(performance.now()));
+      this.segRunMs = performance.now() - s0;
     } catch (err) {
       this.camError = String((err && err.message) || err).slice(0, 200);
       return;
     }
     const masks = res.confidenceMasks;
     if (!masks || masks.length <= CLOTHES) return;
-    this.segMs = performance.now() - segStart;
     const mw = masks[CLOTHES].width;
     const mh = masks[CLOTHES].height;
-    if (hair) this.updateHairFill(frame, masks, mw, mh, eyeY === null ? 1 : eyeY / height);
+    if (hair) {
+      // Hair is only looked for around your head (stray dark patches elsewhere aren't hair).
+      const norm = (b) => b && { x0: b.x0 / width, y0: b.y0 / height, x1: b.x1 / width, y1: b.y1 / height };
+      const area = head && { ...norm(head), seed: norm(head.seed) };
+      this.updateHairFill(frame, masks, mw, mh, eyeY === null ? 1 : eyeY / height, area);
+    }
     if (!clothes) {
       masks.forEach((m) => m.close && m.close());
       return;
@@ -397,7 +456,8 @@ export class LookLayers {
   // Paints the background over your hair: remembered background where it was seen, else the nearby
   // background colours spread inwards. Runs with each camera segmentation.
   // eyeLine: 0..1 down the picture; your face's skin helps fill only above it (the hairline).
-  updateHairFill(frame, masks, maskW, maskH, eyeLine = 1) {
+  updateHairFill(frame, masks, maskW, maskH, eyeLine = 1, area = null) {
+    const fillStart = performance.now();
     // Work on a small grid (the masks can be full camera size).
     const mw = Math.min(maskW, HAIR_GRID);
     const mh = Math.max(1, Math.round((maskH * mw) / maskW));
@@ -409,8 +469,15 @@ export class LookLayers {
       this.plate = new Float32Array(mw * mh * 3);
       this.seen = new Uint8Array(mw * mh);
     }
-    this.smallCtx.drawImage(frame, 0, 0, mw, mh);
-    const px = this.smallCtx.getImageData(0, 0, mw, mh).data;
+    const p0 = performance.now();
+    let px;
+    if (this.segInput.width === mw && this.segInput.height === mh) {
+      px = this.segInputCtx.getImageData(0, 0, mw, mh).data;
+    } else {
+      this.smallCtx.drawImage(this.segInput, 0, 0, mw, mh);
+      px = this.smallCtx.getImageData(0, 0, mw, mh).data;
+    }
+    const p1 = performance.now();
     const sample = (m) => {
       const full = m.getAsFloat32Array();
       const out = new Float32Array(mw * mh);
@@ -425,6 +492,7 @@ export class LookLayers {
     const body = sample(masks[HAIR + 1]); // body skin
     const faceSkin = sample(masks[HAIR + 2]);
     const clothesConf = sample(masks[CLOTHES]);
+    const p2 = performance.now();
     const n = mw * mh;
     const skinRows = Math.round(eyeLine * mh) * mw;
     // Remember the background wherever it's clearly visible.
@@ -450,9 +518,43 @@ export class LookLayers {
     // Where to paint: your hair, grown by a few cells so no strands are left at its edge.
     const hairMask = new Uint8Array(n);
     let any = 0;
-    for (let i = 0; i < n; i += 1) if (hairConf[i] > 0.3) {
-      hairMask[i] = 1;
-      any += 1;
+    const box = (b) => b && [Math.floor(b.x0 * mw), Math.ceil(b.x1 * mw), Math.floor(b.y0 * mh), Math.ceil(b.y1 * mh)];
+    const [ax0, ax1, ay0, ay1] = box(area) || [0, mw, 0, mh];
+    const inside = (x, y, b) => x >= b[0] && x < b[1] && y >= b[2] && y < b[3];
+    const isHair = (i) => {
+      const x = i % mw;
+      const y = (i - x) / mw;
+      return hairConf[i] > 0.3 && x >= ax0 && x < ax1 && y >= ay0 && y < ay1;
+    };
+    const seed = area && box(area.seed);
+    if (seed) {
+      // Only hair joined to the hair around your face counts (dark patches elsewhere aren't yours).
+      const queue = [];
+      for (let i = 0; i < n; i += 1) {
+        const x = i % mw;
+        if (inside(x, (i - x) / mw, seed) && isHair(i)) {
+          hairMask[i] = 1;
+          queue.push(i);
+        }
+      }
+      while (queue.length) {
+        const i = queue.pop();
+        any += 1;
+        const x = i % mw;
+        for (const j of [x > 0 ? i - 1 : -1, x < mw - 1 ? i + 1 : -1, i - mw, i + mw]) {
+          if (j >= 0 && j < n && !hairMask[j] && isHair(j)) {
+            hairMask[j] = 1;
+            queue.push(j);
+          }
+        }
+      }
+    } else {
+      for (let i = 0; i < n; i += 1) {
+        if (isHair(i)) {
+          hairMask[i] = 1;
+          any += 1;
+        }
+      }
     }
     const grown = dilate(hairMask, mw, mh, Math.max(1, Math.round(mw / 100)));
     const img = this.hairFillCtx.createImageData(mw, mh);
@@ -463,15 +565,25 @@ export class LookLayers {
       img.data[i * 4 + 3] = grown[i] ? 255 : 0;
     }
     this.hairFillCtx.putImageData(img, 0, 0);
+    if (this.hairSoft.width !== mw || this.hairSoft.height !== mh) {
+      this.hairSoft.width = mw;
+      this.hairSoft.height = mh;
+    }
+    this.hairSoftCtx.clearRect(0, 0, mw, mh);
+    this.hairSoftCtx.filter = 'blur(1.5px)';
+    this.hairSoftCtx.drawImage(this.hairFill, 0, 0);
+    this.hairSoftCtx.filter = 'none';
     this.hairFillOn = any > n * 0.002;
     this.hairCells = any;
+    this.fillMs = performance.now() - fillStart;
+    this.fillParts = { pixels: Math.round(p1 - p0), masks: Math.round(p2 - p1), maths: Math.round(performance.now() - p2) };
   }
 
   // Hides your own hair (call before the photo's hair is drawn). Your face is never painted over.
   // segmented: drawOutfit already ran the camera segmentation this frame (with hideHair).
   hideOwnHair(ctx, frame, width, height, t, points, { segmented = false } = {}) {
     if (!this.videoSeg) return;
-    if (!segmented) this.findCameraClothes(frame, width, height, t, null, { clothes: false, hair: true, eyeY: eyeLine(points) });
+    if (!segmented) this.findCameraClothes(frame, width, height, t, null, { clothes: false, hair: true, eyeY: eyeLine(points), head: headArea(points) });
     if (!this.hairFillOn) return;
     if (this.layer.width !== width || this.layer.height !== height) {
       this.layer.width = width;
@@ -481,10 +593,9 @@ export class LookLayers {
     l.setTransform(1, 0, 0, 1, 0, 0);
     l.globalCompositeOperation = 'source-over';
     l.clearRect(0, 0, width, height);
-    l.filter = `blur(${Math.max(2, Math.round(width / 320))}px)`;
+    l.imageSmoothingEnabled = true;
     l.imageSmoothingQuality = 'high';
-    l.drawImage(this.hairFill, 0, 0, width, height);
-    l.filter = 'none';
+    l.drawImage(this.hairSoft, 0, 0, width, height);
     if (points) {
       // Keep the face (from the hairline down) as it is.
       l.globalCompositeOperation = 'destination-out';
@@ -504,7 +615,7 @@ export class LookLayers {
       chinY = 0;
       for (let i = 1; i < points.length; i += 2) chinY = Math.max(chinY, points[i]);
     }
-    this.findCameraClothes(frame, width, height, t, chinY, { clothes: true, hair: hideHair, eyeY: points ? eyeLine(points) : null });
+    this.findCameraClothes(frame, width, height, t, chinY, { clothes: true, hair: hideHair, eyeY: points ? eyeLine(points) : null, head: headArea(points) });
     const cam = this.camBox;
     const pb = this.photo.clothesBox;
     if (!cam) return;

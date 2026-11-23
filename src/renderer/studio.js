@@ -1533,6 +1533,7 @@ function bindEvents() {
         device: local.deviceLabel || null,
         tried: local.tried,
         tracker: Boolean(local.tracker),
+        frameMs: local.frameMs ? Object.fromEntries(Object.entries(local.frameMs).map(([k, v]) => [k, Math.round(v * 10) / 10])) : null,
       },
       source: scene && scene.source && scene.source.type,
       voice: { running: voice.running, voice: state.settings.voice, ai: voice.aiSummary() },
@@ -2082,7 +2083,7 @@ async function runSmokeTest() {
       const lookUntil = Date.now() + 60000;
       while (Date.now() < lookUntil && !(lookWanted.hair || lookWanted.outfit)) await wait(250);
       await wait(1500);
-      const lookStep = { step: 'look', photoRead: Boolean(look.photo), hair: look.hasHair, outfit: look.hasOutfit, wanted: { ...lookWanted }, cameraClothes: Boolean(look.camBox), measured: look.measured, camRuns: look.camRuns, camError: look.camError, camFound: look.camFound, camOn: look.camOn, camSize: look.camSize, camBox: look.camBox, photoBox: look.photo && look.photo.clothesBox, videoSeg: Boolean(look.videoSeg), hideHair: Boolean(lookWanted.hideHair), hairFillOn: look.hairFillOn, hairCells: look.hairCells };
+      const lookStep = { step: 'look', photoRead: Boolean(look.photo), hair: look.hasHair, outfit: look.hasOutfit, wanted: { ...lookWanted }, cameraClothes: Boolean(look.camBox), measured: look.measured, camRuns: look.camRuns, camError: look.camError, camFound: look.camFound, camOn: look.camOn, camSize: look.camSize, camBox: look.camBox, photoBox: look.photo && look.photo.clothesBox, videoSeg: Boolean(look.videoSeg), hideHair: Boolean(lookWanted.hideHair), hairFillOn: look.hairFillOn, hairCells: look.hairCells, frameMs: local.frameMs, segMs: look.segMs, fillMs: look.fillMs, fillParts: look.fillParts, segRunMs: look.segRunMs };
       if (api.smokeFiles.lookOut) {
         const png = await new Promise((r) => local.canvas.toBlob(r, 'image/png'));
         lookStep.saved = await api.smokeSave(api.smokeFiles.lookOut, new Uint8Array(await png.arrayBuffer()));

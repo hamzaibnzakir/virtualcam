@@ -356,6 +356,7 @@ export class LocalFaceAI {
       this.smoother.reset();
       this.warp.clear();
     }
+    const t0 = performance.now();
     drawSource(this.inputCtx, width, height);
     const t = performance.now();
     const ts = Math.max(this.lastTs + 1, Math.floor(t));
@@ -375,19 +376,32 @@ export class LocalFaceAI {
     }
     const points = this.smoother.update(landmarks ? this.raw : null, t);
     this.points = points;
+    const t1 = performance.now();
 
     // The live picture, with the latest swapped face bent onto where your face is now.
     this.ctx.drawImage(this.input, 0, 0);
     if (this.look && this.lookOpts.outfit) this.look.drawOutfit(this.ctx, this.input, width, height, t, points, { hideHair: this.lookOpts.hideHair });
+    const t2 = performance.now();
     if (points && this.warp.hasFace) {
       this.warp.draw(width, height, points, t);
       this.ctx.globalAlpha = this.smoother.strength;
       this.ctx.drawImage(this.warp.canvas, 0, 0);
       this.ctx.globalAlpha = 1;
     }
+    const t3 = performance.now();
     if (this.look && this.lookOpts.hideHair && points) this.look.hideOwnHair(this.ctx, this.input, width, height, t, points, { segmented: this.lookOpts.outfit });
     if (this.look && this.lookOpts.hair && points) this.look.drawHair(this.ctx, points, this.smoother.strength);
+    const t4 = performance.now();
     this.lastTickAt = t;
+    // Where each frame's time goes (smoothed), for the speed report.
+    const f = this.frameMs || (this.frameMs = { source: 0, track: 0, outfit: 0, face: 0, hair: 0, total: 0 });
+    const ema = (k, v) => (f[k] = f[k] ? f[k] * 0.95 + v * 0.05 : v);
+    ema('source', t - t0);
+    ema('track', t1 - t);
+    ema('outfit', t2 - t1);
+    ema('face', t3 - t2);
+    ema('hair', t4 - t3);
+    ema('total', t4 - t0);
 
     // Ask for a new face whenever the engine is free.
     if (!landmarks || !points || this.inFlight) return;
