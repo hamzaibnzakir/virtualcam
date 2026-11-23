@@ -1513,6 +1513,38 @@ function bindEvents() {
   });
   $('btn-models').addEventListener('click', () => startDownload('core'));
   $('btn-engine-log').addEventListener('click', () => api.showEngineLog());
+  // Everything needed to tune speed and quality on this PC, as text to paste into a chat.
+  $('btn-speed-report').addEventListener('click', async () => {
+    const info = await api.appInfo().catch(() => ({}));
+    const scene = activeScene();
+    const report = {
+      app: info && info.version,
+      hardware: hardware && { verdict: hardware.verdict, gpus: hardware.gpus, ramGB: hardware.ramGB },
+      engine: activeEngine,
+      look: { hair: lookWanted.hair, outfit: lookWanted.outfit, hideHair: Boolean(lookWanted.hideHair), segMs: look.segMs ? Math.round(look.segMs) : null },
+      output: { fps: compositor.fps, size: `${$('program').width}x${$('program').height}` },
+      lite: { fps: lite.stats.fps, ms: lite.stats.ms, tracking: lite.delegate },
+      local: {
+        model: state.settings.localModel,
+        boost: state.settings.faceBoost,
+        swapsPerSecond: local.stats.fps,
+        ms: local.stats.ms,
+        stages: local.stats.stages,
+        device: local.deviceLabel || null,
+        tried: local.tried,
+        tracker: Boolean(local.tracker),
+      },
+      source: scene && scene.source && scene.source.type,
+      voice: { running: voice.running, voice: state.settings.voice, ai: voice.aiSummary() },
+    };
+    const text = `Brainbox VirtualCam speed report\n${JSON.stringify(report, null, 2)}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Speed report copied. Paste it into the chat.');
+    } catch {
+      showToast("Couldn't copy the report", true);
+    }
+  });
   // Inspector tabs: Look (AI) and Picture (source, name tag).
   const showTab = (name) => {
     document.querySelectorAll('.tabs [role="tab"]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
@@ -2085,8 +2117,13 @@ async function runSmokeTest() {
           chooseVoice('mine:smoketest');
           const mineUntil = Date.now() + 60000;
           while (Date.now() < mineUntil && !(voice.aiLive && voice.ai.voiceFile === 'mine:smoketest') && voice.aiSummary() !== 'error') await wait(250);
-          await wait(2500);
-          const stats = await voice.ai.stats();
+          let stats = null;
+          const stepsUntil = Date.now() + 15000;
+          while (Date.now() < stepsUntil) {
+            await wait(1000);
+            stats = await voice.ai.stats();
+            if (stats && stats.engine === 'my-voice' && stats.steps > 0) break;
+          }
           const message = await convertMessage(upload.subarray(0, 16000 * 3));
           Object.assign(mineStep, { prepared, live: voice.aiLive, state: voice.aiSummary(), error: voice.aiError, stats, messageSeconds: message.samples.length / message.rate });
           mineStep.ok = voice.aiLive && stats && stats.engine === 'my-voice' && stats.steps > 0 && mineStep.messageSeconds > 2.5;

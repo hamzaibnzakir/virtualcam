@@ -98,7 +98,11 @@ async function handle(msg) {
         const e = await engine(kind);
         const t = Date.now();
         await e.setVoice(kind === 'mine' ? msg.voice.id : msg.voice);
-        if (active !== e) e.reset();
+        if (active !== e) {
+          // The previous engine drops its leftover audio, so the new voice starts straight away.
+          if (active) active.reset();
+          e.reset();
+        }
         active = e;
         log(`voice ${kind} ${kind === 'mine' ? msg.voice.id : msg.voice.file} ready in ${Date.now() - t} ms`);
         reply({ type: 'voice', kind, device: e.loadInfo.device, ms: e.loadInfo.ms });
