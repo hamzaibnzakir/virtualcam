@@ -66,6 +66,9 @@ function toBytes(pixels) {
 }
 
 const LONG_REQUESTS = new Set(['load', 'reference', 'enhance']);
+// One load at a time: two at once (a quick reload) fought over the graphics chip and made the device
+// timings wrong.
+let loadChain = Promise.resolve();
 
 async function handle(msg) {
   // Long requests report what they are doing every few seconds, so the studio waits as long as work
@@ -83,12 +86,18 @@ async function handle(msg) {
   try {
     switch (msg.type) {
       case 'load': {
-        onStep('loading the AI runtime');
-        loadRuntime();
-        swapper = new FaceSwapper(ort, msg.modelsDir);
-        const info = await swapper.load({ preferred: msg.preferred || 'auto', gpuCount: msg.gpuCount || 0, swapFile: msg.swapFile || null, onStep, log });
-        log(`load: done in ${Date.now() - started} ms on ${info.deviceLabel} (${info.swapMs} ms per swap)`);
-        reply({ type: 'loaded', ...info });
+        const run = async () => {
+          onStep('loading the AI runtime');
+          loadRuntime();
+          const next = new FaceSwapper(ort, msg.modelsDir);
+          const info = await next.load({ preferred: msg.preferred || 'auto', gpuCount: msg.gpuCount || 0, swapFile: msg.swapFile || null, onStep, log });
+          swapper = next;
+          log(`load: done in ${Date.now() - started} ms on ${info.deviceLabel} (${info.swapMs} ms per swap)`);
+          reply({ type: 'loaded', ...info });
+        };
+        const p = loadChain.then(run);
+        loadChain = p.catch(() => {});
+        await p;
         break;
       }
       case 'reference': {

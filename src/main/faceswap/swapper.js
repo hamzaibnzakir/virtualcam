@@ -108,8 +108,9 @@ class FaceSwapper {
     return fs.existsSync(path.join(this.modelsDir, ENHANCER_FILE));
   }
 
-  // Times one swap on a device: the first run sets the device up (it can take seconds on a graphics
-  // chip), the second is the real speed.
+  // Times swaps on a device: the first run sets the device up (it can take seconds on a graphics
+  // chip); then the middle of a few runs (one run alone was too noisy: a fast model once looked
+  // quicker on the Intel chip than on the NVIDIA one, 71 vs 84 ms, when it really runs 64 vs 18 ms).
   async timeSwap(session) {
     const feeds = {
       target: new this.ort.Tensor('float32', new Float32Array(3 * SWAP_SIZE * SWAP_SIZE).fill(0.5), [1, 3, SWAP_SIZE, SWAP_SIZE]),
@@ -119,9 +120,17 @@ class FaceSwapper {
     await session.run(feeds);
     const first = Date.now() - t;
     if (first > 15000) return first; // hopeless for live video; no need for a second run
-    t = Date.now();
-    await session.run(feeds);
-    return Date.now() - t;
+    const runs = [];
+    let total = 0;
+    while (runs.length < 5 && total < 3000) {
+      t = Date.now();
+      await session.run(feeds);
+      const ms = Date.now() - t;
+      runs.push(ms);
+      total += ms;
+    }
+    runs.sort((a, b) => a - b);
+    return runs[Math.floor(runs.length / 2)];
   }
 
   // swapFile: a different swap model file in the models folder (the fast one), else inswapper_128.

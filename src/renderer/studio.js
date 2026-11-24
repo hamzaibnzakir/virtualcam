@@ -967,6 +967,14 @@ function applyAiVoices() {
   voice.setAiVoices(models.voices, state.settings.aiVoices && state.settings.voiceConsent);
 }
 
+// The detail boost takes longer than a fast swap, so picking the fast model turns it off (once you
+// turn it back on yourself, that's kept).
+function fastBoostOff() {
+  if (!state.settings.faceBoost) return;
+  state.settings.faceBoost = false;
+  showToast('Face detail boost turned off: with the fast model it was the slow part. Turn it back on any time.');
+}
+
 // ---------- what calls get: face and/or voice ----------
 
 let realCamTrack = null;
@@ -1567,8 +1575,10 @@ function bindEvents() {
       await refreshModels();
       state.settings.localModel = 'fast';
       local.swapFile = models.fastFile;
+      fastBoostOff();
       changed();
       local.reload();
+      applyScene();
       renderLocal();
       showToast(`Fast model loaded from ${r.name}`);
     } catch (err) {
@@ -1588,8 +1598,10 @@ function bindEvents() {
     }
     state.settings.localModel = want;
     local.swapFile = want === 'fast' ? models.fastFile : null;
+    if (want === 'fast') fastBoostOff();
     changed();
     local.reload();
+    applyScene();
     showToast(want === 'fast' ? 'Switched to the fast model' : 'Switched to the best-quality model');
   });
   // Voice & calls

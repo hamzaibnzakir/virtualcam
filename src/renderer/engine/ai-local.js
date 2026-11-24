@@ -113,7 +113,10 @@ export class LocalFaceAI {
     this.inFlight = null;
     this.applied = { refKey: null, enhance: false };
     if (this.warp) this.warp.clear();
-    if (this.target) this.apply(this.target);
+    // Through the same queue as every other change, so a reload never starts a second engine load
+    // alongside one already running.
+    this.dirty = true;
+    this.pump();
   }
 
   setTarget(target) {
@@ -128,7 +131,11 @@ export class LocalFaceAI {
     try {
       while (this.dirty) {
         this.dirty = false;
-        await this.apply(this.target);
+        try {
+          await this.apply(this.target);
+        } catch {
+          // apply reports its own errors; keep going if something changed meanwhile
+        }
       }
     } finally {
       this.running = false;
