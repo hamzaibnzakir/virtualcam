@@ -502,6 +502,8 @@ function renderLocal() {
   btn.disabled = Boolean(busyBoost);
 
   setPressed($('toggle-boost'), state.settings.faceBoost);
+  $('face-sharpness').value = state.settings.faceSharpness;
+  local.sharpness = state.settings.faceSharpness / 100;
   const busyFast = download && download.pack === 'fast';
   $('local-model').value = state.settings.localModel;
   $('local-model').disabled = Boolean(busyFast);
@@ -1568,6 +1570,11 @@ function bindEvents() {
   };
   document.querySelectorAll('.tabs [role="tab"]').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
   showTab('look');
+  $('face-sharpness').addEventListener('input', (e) => {
+    state.settings.faceSharpness = Number(e.target.value);
+    local.sharpness = state.settings.faceSharpness / 100;
+    changed();
+  });
   $('btn-fast-file').addEventListener('click', async () => {
     try {
       const r = await api.importFastModel();

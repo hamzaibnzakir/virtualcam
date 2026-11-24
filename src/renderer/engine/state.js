@@ -88,6 +88,7 @@ function defaultSettings() {
     voice: 'own',
     micId: '',
     aiVoices: true,
+    faceSharpness: 70,
     voiceConsent: false,
     myVoices: {},
     sendFace: true,
@@ -179,6 +180,7 @@ export function normalizeState(raw) {
       sendVoice: rawSettings.sendVoice !== false,
       micId: typeof rawSettings.micId === 'string' ? rawSettings.micId.slice(0, 200) : '',
       aiVoices: rawSettings.aiVoices !== false,
+      faceSharpness: Number.isFinite(rawSettings.faceSharpness) ? Math.max(0, Math.min(100, Math.round(rawSettings.faceSharpness))) : 70,
       voiceConsent: rawSettings.voiceConsent === true,
     },
   };

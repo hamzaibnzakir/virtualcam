@@ -392,7 +392,9 @@ export class LocalFaceAI {
     if (this.look && this.lookOpts.outfit) this.look.drawOutfit(this.ctx, this.input, width, height, t, points, { hideHair: this.lookOpts.hideHair });
     const t2 = performance.now();
     if (points && this.warp.hasFace) {
-      this.warp.draw(width, height, points, t);
+      // Camera detail on the face: full without the detail boost; a little with it (already sharp).
+      this.warp.detail = (this.sharpness ?? 0.7) * (this.applied && this.applied.enhance ? 0.3 : 1);
+      this.warp.draw(width, height, points, t, this.input);
       this.ctx.globalAlpha = this.smoother.strength;
       this.ctx.drawImage(this.warp.canvas, 0, 0);
       this.ctx.globalAlpha = 1;
