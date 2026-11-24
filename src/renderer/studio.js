@@ -510,7 +510,12 @@ function renderLocal() {
     const pct = download.total ? Math.floor((download.done / download.total) * 100) : 0;
     $('fast-line').textContent = `Downloading the fast model… ${pct}%`;
   } else {
-    $('fast-line').textContent = 'The fast model is not downloaded yet.';
+    $('fast-line').textContent = "The fast model isn't published yet. If you have its file, use “Load model file…”.";
+  }
+  $('fast-file-note').textContent = models.fast ? 'Fast model installed. Replace it?' : 'Have a fast model file?';
+  if (state.settings.localModel === 'fast' && models.fast && state.settings.faceBoost) {
+    $('fast-line').hidden = false;
+    $('fast-line').textContent = 'Tip: turn off Face detail boost to feel the fast model’s speed (the boost takes longer than the swap itself).';
   }
   $('boost-row').hidden = models.boost && !busyBoost;
   $('boost-line').textContent = busyBoost ? 'Downloading the detail model…' : `Needs a one-time download (${formatMB(models.boostBytes)})`;
@@ -1555,12 +1560,29 @@ function bindEvents() {
   };
   document.querySelectorAll('.tabs [role="tab"]').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
   showTab('look');
+  $('btn-fast-file').addEventListener('click', async () => {
+    try {
+      const r = await api.importFastModel();
+      if (!r) return;
+      await refreshModels();
+      state.settings.localModel = 'fast';
+      local.swapFile = models.fastFile;
+      changed();
+      local.reload();
+      renderLocal();
+      showToast(`Fast model loaded from ${r.name}`);
+    } catch (err) {
+      showToast((err && err.message) || "Couldn't load that file", true);
+    }
+  });
   $('local-model').addEventListener('change', async (e) => {
     const want = e.target.value === 'fast' ? 'fast' : 'best';
     if (want === 'fast' && !models.fast) {
-      await startDownload('fast');
+      await startDownload('fast').catch(() => {});
       if (!models.fast) {
         e.target.value = 'best';
+        $('fast-line').hidden = false;
+        $('fast-line').textContent = "The fast model isn't published yet. If you have its file, use “Load model file…”.";
         return;
       }
     }

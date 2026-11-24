@@ -107,6 +107,7 @@ contextBridge.exposeInMainWorld('vcam', {
 
   hardwareCheck: () => ipcRenderer.invoke('hardware:check'),
   modelsStatus: () => ipcRenderer.invoke('models:status'),
+  importFastModel: () => ipcRenderer.invoke('models:import-fast'),
   modelsDownload: (pack) => ipcRenderer.invoke('models:download', pack),
   modelsCancel: () => ipcRenderer.invoke('models:cancel'),
   onModelsProgress: (handler) => listen('models:progress', handler),

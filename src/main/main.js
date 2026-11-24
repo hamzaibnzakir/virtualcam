@@ -739,6 +739,40 @@ function registerIpc() {
 
   ipcMain.handle('models:status', () => ({ ...modelStatus(modelsDir()), busy: Boolean(downloader && downloader.busy) }));
 
+  // Uses a fast swap model file you already have (e.g. a test build of the trained model) instead of
+  // downloading the published one.
+  ipcMain.handle('models:import-fast', async () => {
+    const pick = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose the fast face model (.onnx)',
+      properties: ['openFile'],
+      filters: [{ name: 'Face model', extensions: ['onnx'] }],
+    });
+    if (pick.canceled || !pick.filePaths.length) return null;
+    const src = pick.filePaths[0];
+    const data = await fs.promises.readFile(src);
+    if (data.length < 1e6 || data.length > 2e8) throw new Error('That file is not a fast face model (wrong size).');
+    // A swap model has inputs called "target" and "source" and stores its identity matrix ("emap").
+    const head = data.subarray(0, Math.min(data.length, 4 * 1024 * 1024)).toString('latin1');
+    const tail = data.subarray(Math.max(0, data.length - 4 * 1024 * 1024)).toString('latin1');
+    if (!(head + tail).includes('target') || !(head + tail).includes('source')) {
+      throw new Error('That file is not a fast face model (it has no target/source inputs).');
+    }
+    const crypto = require('node:crypto');
+    const dir = modelsDir();
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = 'inswapper_fast_imported.onnx';
+    await fs.promises.writeFile(path.join(dir, file), data);
+    const manifest = {
+      file,
+      url: 'https://github.com/hamzaibnzakir/virtualcam',
+      sha256: crypto.createHash('sha256').update(data).digest('hex'),
+      bytes: data.length,
+      version: `imported ${path.basename(src)}`.slice(0, 80),
+    };
+    await fs.promises.writeFile(path.join(dir, 'fast-model.json'), JSON.stringify(manifest));
+    return { file, name: path.basename(src) };
+  });
+
   ipcMain.handle('models:download', async (_e, pack) => {
     if (pack !== 'core' && pack !== 'boost' && pack !== 'fast' && pack !== 'voices' && pack !== 'myvoice') throw new Error('Unknown model pack');
     if (!downloader) downloader = new Downloader(modelsDir());
