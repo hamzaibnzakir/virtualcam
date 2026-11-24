@@ -183,6 +183,20 @@ def main():
     out = os.path.join(W, 'run')
     os.makedirs(out, exist_ok=True)
     ckpts = previous('run/ckpt_last.pt')
+    if len(ckpts) > 1:
+        # Several earlier runs attached: continue from the one that got furthest (file dates on
+        # Kaggle's mounted inputs can't be trusted).
+        import torch
+
+        def ckpt_step(path):
+            try:
+                return int(torch.load(path, map_location='cpu', weights_only=False).get('step', 0))
+            except Exception:  # noqa: BLE001
+                return -1
+
+        steps = {c: ckpt_step(c) for c in ckpts}
+        ckpts.sort(key=lambda c: steps[c], reverse=True)
+        say('checkpoints found: ' + ', '.join(f'{c} (step {steps[c]})' for c in ckpts))
     if ckpts:
         for name in ('ckpt_last.pt', 'ckpt_best.pt', 'train_log.csv', 'val.jsonl'):
             src = os.path.join(os.path.dirname(ckpts[0]), name)
